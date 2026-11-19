@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenRead 视觉与交互 Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --window: #f7f5f2;
+      --surface: #fffefd;
+      --field: #faf9fb;
+      --ink: #191b22;
+      --muted: #595d69;
+      --line: #dddbe1;
+      --accent: #4b4d99;
+      --mark: #4b4d99;
+      --accent-ink: #fff;
+      --selected: #eeedf9;
+      --selected-ink: #3e4295;
+      --ok: #eaf5ee;
+      --shadow: 0 8px 24px rgb(32 29 49 / 8%);
+      font: 14px/1.55 Inter, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --window: #19191e;
+      --surface: #222228;
+      --field: #292a33;
+      --ink: #f2f0ef;
+      --muted: #bcbac7;
+      --line: #3a3a46;
+      --accent: #5154a0;
+      --mark: #bdbbff;
+      --accent-ink: #fff;
+      --selected: #30304a;
+      --selected-ink: #c1c1ff;
+      --ok: #263a2f;
+      --shadow: 0 8px 24px rgb(0 0 0 / 24%);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root[data-theme="system"] {
+        color-scheme: dark;
+        --window: #19191e;
+        --surface: #222228;
+        --field: #292a33;
+        --ink: #f2f0ef;
+        --muted: #bcbac7;
+        --line: #3a3a46;
+        --accent: #5154a0;
+        --mark: #bdbbff;
+        --accent-ink: #fff;
+        --selected: #30304a;
+        --selected-ink: #c1c1ff;
+        --ok: #263a2f;
+        --shadow: 0 8px 24px rgb(0 0 0 / 24%);
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 720px; min-height: 100vh; color: var(--ink); background: var(--window); }
+    button, input, select, textarea { color: inherit; font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid #8586d1; outline-offset: 2px; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    .hidden { display: none !important; }
+    .topbar { height: 58px; display: flex; align-items: center; gap: 22px; padding: 0 25px; }
+    .wordmark { font: 700 23px/1 Georgia, "Times New Roman", serif; letter-spacing: -.04em; }
+    .menu-wrap { position: relative; }
+    .menu-trigger, .quiet-button, .icon-button { border: 0; background: transparent; border-radius: 8px; }
+    .menu-trigger { padding: 8px 10px; }
+    .menu-trigger:hover, .quiet-button:hover, .icon-button:hover { background: var(--selected); }
+    .menu-popover { position: absolute; z-index: 10; top: calc(100% + 5px); left: 0; min-width: 200px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; box-shadow: var(--shadow); }
+    .menu-popover button { display: block; width: 100%; padding: 9px 11px; text-align: left; border: 0; border-radius: 7px; background: transparent; }
+    .menu-popover button:hover { background: var(--selected); }
+
+    .welcome-page { position: relative; min-height: 100vh; padding: 0; }
+    .welcome-content { position: relative; width: 100%; height: 100vh; text-align: center; }
+    .welcome-wordmark { position: absolute; top: 14%; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: clamp(56px, 9vw, 104px); line-height: 1; font-weight: 760; letter-spacing: -.075em; }
+    .brand-mark { position: absolute; top: 29.3%; left: 50%; transform: translateX(-50%); width: 168px; height: 130px; margin: 0; color: var(--mark); }
+    .brand-mark svg { width: 100%; height: 100%; }
+    .welcome-actions { position: absolute; top: 53.4%; left: 50%; transform: translateX(-50%); width: min(574px, calc(100vw - 48px)); display: grid; gap: 20px; }
+    .welcome-actions button { min-height: 81px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); font-size: 21px; font-weight: 600; }
+    .welcome-actions .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    .welcome-note { position: absolute; top: 89.3%; left: 0; width: 100%; margin: 0; color: var(--muted); font-size: 17px; }
+
+    .reader-page { height: 100vh; min-height: 620px; display: grid; grid-template-rows: 58px 1fr; }
+    .reader-topbar { padding-left: 25px; }
+    .reader-layout { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr); gap: 0; margin: 0 10px 12px 64px; }
+    .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+    .tabbar { height: 52px; flex: 0 0 52px; display: flex; align-items: stretch; gap: 6px; padding: 6px 10px 0; background: var(--window); border-bottom: 1px solid var(--line); }
+    .tabstrip { flex: 1; min-width: 0; display: flex; align-items: stretch; gap: 7px; overflow-x: auto; scrollbar-width: thin; }
+    .tab { min-width: 0; max-width: 190px; display: flex; align-items: stretch; overflow: hidden; flex: 0 0 auto; border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface); }
+    .tab.active { color: var(--selected-ink); background: var(--selected); border-color: var(--line); box-shadow: inset 0 -2px var(--accent); }
+    .tab-label, .tab-close { border: 0; background: transparent; }
+    .tab-label { min-width: 0; max-width: 148px; padding: 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tab-close { padding: 0 7px; color: var(--muted); }
+    .tab-close:hover { color: var(--ink); background: rgb(127 127 150 / 10%); }
+    .tab-add { width: 43px; flex: 0 0 43px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--ink); font-size: 24px; }
+    .tab-add:hover { color: var(--accent); background: var(--selected); }
+    .splitter { position: relative; cursor: col-resize; touch-action: none; display: grid; place-items: center; }
+    .splitter::before { content: ""; position: absolute; inset: 0 4px; }
+    .splitter-handle { position: relative; width: 18px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--surface); font-size: 17px; line-height: 1; }
+    .source-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; background: var(--surface); }
+    .source-paper { min-height: 100%; padding: clamp(25px, 4vw, 52px); background: #fffefa; color: #1d1b19; border: 1px solid #ece8e0; border-radius: 10px; box-shadow: 0 1px 4px rgb(32 27 18 / 5%); font: 13px/1.8 Georgia, "Noto Serif CJK SC", "Songti SC", serif; }
+    .source-paper h1 { margin: 0 0 15px; text-align: center; font-size: clamp(19px, 2vw, 25px); line-height: 1.45; }
+    .source-paper .authors { text-align: center; margin: 8px 0 22px; }
+    .source-paper h2 { margin: 19px 0 8px; font-size: 18px; }
+    .source-paper h3 { margin: 13px 0 5px; font-size: 15px; }
+    .source-paper p { margin: 6px 0; text-indent: 2em; }
+    .source-paper .abstract { border-bottom: 1px solid #e7e3dd; padding-bottom: 10px; }
+    .source-paper .diagram { display: flex; align-items: center; justify-content: space-around; gap: 4px; margin: 18px 0; }
+    .source-paper .diagram span { padding: 5px 8px; border: 1px solid #d5d1db; border-radius: 5px; background: #f9f8fc; white-space: nowrap; }
+    .source-empty { flex: 1; display: grid; place-content: center; text-align: center; gap: 14px; color: var(--muted); cursor: pointer; }
+    .source-empty:hover .empty-plus { color: var(--accent); border-color: var(--accent); background: var(--selected); }
+    .empty-plus { width: 110px; height: 110px; margin: auto; display: grid; place-items: center; border: 1px dashed #acabbc; border-radius: 20px; color: #747583; font-size: 64px; line-height: 1; transition: .15s ease; }
+    .source-empty strong { color: var(--ink); font-size: 21px; }
+    .source-empty small { font-size: 14px; }
+    .pdf-frame { width: 100%; height: 100%; border: 0; background: #fff; }
+    .explanation-body { flex: 1; min-height: 0; overflow: auto; padding: 53px clamp(25px, 4vw, 52px) 16px; }
+    .explanation-body h1 { margin: 0 0 25px; font: 600 clamp(20px, 2vw, 27px)/1.45 Georgia, "Noto Serif CJK SC", "Songti SC", serif; }
+    .explanation-body h2 { margin: 30px 0 8px; color: var(--accent); font-size: 21px; }
+    .explanation-body p, .explanation-body li { font: 16px/1.85 Georgia, "Noto Serif CJK SC", "Songti SC", serif; }
+    .explanation-body ul { padding-left: 25px; }
+    .explanation-body li::marker { color: var(--accent); }
+    .explanation-empty { flex: 1; display: grid; place-content: center; text-align: center; color: var(--muted); }
+    .explanation-empty h2 { margin: 0 0 7px; color: var(--ink); font-size: 23px; font-weight: 600; }
+    .composer { position: relative; flex: 0 0 auto; margin: 10px 16px 18px; padding: 13px 17px 12px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow); }
+    .composer textarea { width: 100%; min-height: 42px; max-height: 170px; resize: none; padding: 2px 38px 7px 4px; border: 0; background: transparent; outline: none; font-size: 16px; }
+    .composer textarea:focus-visible { outline: none; }
+    .composer-resize { position: absolute; top: 10px; right: 13px; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 19px; line-height: 1; }
+    .composer-resize:hover { color: var(--ink); background: var(--selected); }
+    .composer.expanded textarea { min-height: 112px; }
+    .composer-controls { display: flex; align-items: center; gap: 10px; }
+    .model-select { max-width: min(360px, 65%); min-height: 38px; padding: 6px 30px 6px 12px; border: 1px solid var(--line); border-radius: 20px; background: var(--field); }
+    .composer-spacer { flex: 1; }
+    .send-button { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; border: 0; border-radius: 12px; color: white; background: var(--accent); font-size: 20px; }
+    .send-button:hover { filter: brightness(1.12); }
+    .gear { position: fixed; left: 17px; bottom: 18px; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font-size: 23px; }
+    .gear:hover { background: var(--selected); color: var(--accent); }
+    .toast { position: fixed; z-index: 40; right: 24px; bottom: 22px; max-width: min(420px, calc(100vw - 48px)); padding: 11px 16px; border-radius: 10px; color: var(--accent-ink); background: var(--accent); box-shadow: var(--shadow); }
+
+    .settings-page { min-height: 100vh; padding: 21px clamp(26px, 4vw, 68px) 48px; }
+    .back-button { margin: 0 0 15px; padding: 5px 0; border: 0; background: transparent; color: var(--selected-ink); font-size: 16px; }
+    .back-button:hover { text-decoration: underline; }
+    .settings-title { margin: 0; font-size: 34px; line-height: 1.2; letter-spacing: -.035em; }
+    .settings-subtitle { margin: 8px 0 0; color: var(--muted); font-size: 17px; }
+    .settings-layout { display: grid; grid-template-columns: minmax(136px, 168px) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 34px; }
+    .settings-nav { display: grid; gap: 6px; padding-top: 14px; }
+    .settings-nav button { width: 100%; min-height: 52px; padding: 9px 12px; border: 0; border-radius: 10px; text-align: left; background: transparent; font-size: 16px; }
+    .settings-nav button:hover { background: var(--selected); }
+    .settings-nav button[aria-current="true"] { color: var(--selected-ink); background: var(--selected); box-shadow: inset 3px 0 var(--accent); font-weight: 650; }
+    .settings-nav .nav-icon { display: inline-grid; width: 25px; margin-right: 7px; color: var(--accent); text-align: center; font-size: 19px; vertical-align: middle; }
+    .settings-content { min-width: 0; }
+    .settings-panel { min-width: 0; padding: 20px 22px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: 0 1px 3px rgb(32 29 49 / 5%); }
+    .panel-heading { display: flex; align-items: start; gap: 12px; }
+    .panel-heading h2, .settings-panel h2 { margin: 0; font-size: 25px; line-height: 1.3; letter-spacing: -.025em; }
+    .panel-heading p, .settings-panel > p { margin: 4px 0 0; color: var(--muted); }
+    .push { margin-left: auto; }
+    .primary-button { min-height: 42px; padding: 8px 15px; border: 1px solid var(--accent); border-radius: 9px; color: var(--accent-ink); background: var(--accent); white-space: nowrap; }
+    .primary-button:hover { filter: brightness(1.08); }
+    .provider-card { margin-top: 26px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .provider-header { display: flex; align-items: center; gap: 9px; min-height: 42px; }
+    .provider-expand { min-width: 0; flex: 1; display: flex; align-items: center; gap: 11px; padding: 5px 0; border: 0; background: transparent; text-align: left; font-size: 19px; font-weight: 650; }
+    .provider-expand:hover { color: var(--accent); }
+    .provider-symbol { font-size: 22px; }
+    .provider-state { padding: 2px 9px; border-radius: 6px; color: #34784e; background: var(--ok); font-size: 12px; font-weight: 600; }
+    .provider-state.off { color: var(--muted); background: var(--field); }
+    .switch { appearance: none; width: 42px; height: 24px; margin: 0 5px; border: 0; border-radius: 99px; background: #c6c6ce; position: relative; cursor: pointer; }
+    .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0003; transition: transform .15s ease; }
+    .switch:checked { background: var(--accent); }
+    .switch:checked::after { transform: translateX(18px); }
+    .provider-more { padding: 6px 8px; border: 0; background: transparent; border-radius: 7px; font-size: 20px; }
+    .provider-fields { display: grid; gap: 11px; margin: 13px 0 0; }
+    .provider-fields label { display: grid; grid-template-columns: 115px minmax(0, 1fr); align-items: center; gap: 12px; font-weight: 550; }
+    .provider-fields input, .model-row input { width: 100%; min-width: 0; height: 42px; padding: 7px 12px; border: 1px solid #c5c5d0; border-radius: 9px; background: var(--field); }
+    :root[data-theme="dark"] .provider-fields input, :root[data-theme="dark"] .model-row input { border-color: var(--line); }
+    @media (prefers-color-scheme: dark) { :root[data-theme="system"] .provider-fields input, :root[data-theme="system"] .model-row input { border-color: var(--line); } }
+    .masked-key { letter-spacing: .18em; }
+    .provider-divider { height: 1px; margin: 18px 0 14px; background: var(--line); }
+    .models-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 17px; font-weight: 650; }
+    .models-heading .quiet-button { color: var(--selected-ink); }
+    .model-list { display: grid; gap: 8px; }
+    .model-row { display: grid; grid-template-columns: minmax(0, 1fr) 37px 37px; align-items: center; gap: 7px; }
+    .model-row button { width: 37px; height: 37px; border: 0; border-radius: 7px; background: transparent; font-size: 17px; }
+    .model-row button:hover { background: var(--selected); }
+    .empty-providers { margin: 22px 0 0; padding: 22px; border: 1px dashed var(--line); border-radius: 11px; color: var(--muted); text-align: center; }
+    .account-status { display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 12px 14px; border-radius: 10px; background: var(--ok); }
+    .status-dot { color: #34804d; font-size: 21px; }
+    .account-status button { margin-left: auto; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .theme-options { display: grid; gap: 12px; margin-top: 14px; }
+    .theme-option { display: grid; grid-template-columns: 22px 84px minmax(0, 1fr); align-items: center; gap: 10px; padding: 2px; border: 0; border-radius: 9px; background: transparent; text-align: left; }
+    .theme-option:hover { background: var(--selected); }
+    .theme-option input { accent-color: var(--accent); }
+    .theme-preview { height: 54px; border: 1px solid var(--line); border-radius: 9px; background: #fbfaf8; box-shadow: 0 1px 2px #0000000c; }
+    .theme-preview::before { content: ""; display: block; width: 51px; height: 4px; margin: 13px 0 6px 9px; border-radius: 4px; background: #dedde1; box-shadow: 0 9px 0 #dedde1, 0 18px 0 #dedde1; }
+    .theme-preview.dark { background: #24252b; border-color: #42434b; }
+    .theme-preview.dark::before { background: #53545b; box-shadow: 0 9px 0 #53545b, 0 18px 0 #53545b; }
+    .theme-preview.system { background: linear-gradient(135deg, #fbfaf8 0 49%, #24252b 50% 100%); }
+    .theme-label { display: grid; gap: 2px; }
+    .theme-label strong { font-size: 15px; }
+    .theme-label small { color: var(--muted); }
+    .dialog { width: min(430px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); }
+    .dialog::backdrop { background: rgb(12 12 18 / 45%); }
+    .dialog h2 { margin: 0 0 8px; font-size: 21px; }
+    .dialog label { display: grid; gap: 6px; margin-top: 13px; }
+    .dialog input, .dialog select { min-height: 42px; width: 100%; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+    .chat-response { margin: 24px 0; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .chat-response p { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .dialog p { color: var(--muted); }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
+    .dialog-actions button { min-height: 39px; padding: 7px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .dialog-actions .primary-button { border-color: var(--accent); background: var(--accent); }
+    @media (max-width: 1060px) {
+      .settings-layout { grid-template-columns: 140px minmax(0, 1fr); }
+    }
+    @media (max-width: 760px) {
+      body { min-width: 0; }
+      .reader-page { height: auto; min-height: 100vh; grid-template-rows: 58px 1fr; }
+      .reader-layout { min-height: calc(100vh - 82px); grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0 8px 65px 50px; }
+      .splitter { display: none; }
+      .pane { min-height: 45vh; }
+      .settings-page { padding-inline: 18px; }
+      .brand-mark { width: 140px; height: 112px; }
+      .welcome-wordmark { top: 16%; }
+      .welcome-actions { top: 54%; }
+      .welcome-note { top: 88%; font-size: 14px; }
+      .settings-layout { grid-template-columns: minmax(0, 1fr); }
+      .settings-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0; }
+      .settings-nav button { padding: 8px; text-align: center; }
+      .provider-fields label { grid-template-columns: 90px minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <section id="welcome" class="welcome-page" aria-label="欢迎页">
+    <div class="welcome-content">
+      <div class="welcome-wordmark">OpenRead</div>
+      <div class="brand-mark" aria-label="OpenRead 书页标志">
+        <svg viewBox="0 0 140 118" fill="none" aria-hidden="true">
+          <path d="M7 19Q7 15 12 16L69 33Q74 35 74 40V108Q74 112 69 110L12 94Q7 92 7 88V19Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M77 30L128 15Q133 13 133 18V86Q133 90 129 92L81 106" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="welcome-actions">
+        <button id="welcomeChatGPT" class="primary">ChatGPT 登录</button>
+        <button id="welcomeApi">使用 API Key</button>
+      </div>
+      <p class="welcome-note">可以先进入阅读台，稍后再配置 AI。</p>
+    </div>
+  </section>
+
+  <section id="reader" class="reader-page hidden" aria-label="阅读主页">
+    <header class="topbar reader-topbar">
+      <div class="wordmark">OpenRead</div>
+      <div class="menu-wrap">
+        <button id="fileMenuButton" class="menu-trigger" aria-expanded="false">文件</button>
+        <div id="fileMenu" class="menu-popover hidden">
+          <button data-action="open-acr">导入 ACR</button>
+          <button data-action="export-acr">导出为 ACR</button>
+        </div>
+      </div>
+    </header>
+    <main id="readerLayout" class="reader-layout">
+      <section class="pane" aria-label="Source">
+        <div class="tabbar">
+          <div id="sourceTabs" class="tabstrip" role="tablist" aria-label="Source 文档"></div>
+          <button id="addSource" class="tab-add" aria-label="导入 Source" title="导入 Source">＋</button>
+        </div>
+        <div id="sourceContent" class="source-body"></div>
+        <input id="fileInput" class="hidden" type="file" accept=".pdf,application/pdf" multiple>
+      </section>
+      <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" tabindex="0" title="拖动调整两栏宽度"><span class="splitter-handle" aria-hidden="true">Ⅱ</span></div>
+      <section class="pane" aria-label="Explanation">
+        <div class="tabbar">
+          <div id="explanationTabs" class="tabstrip" role="tablist" aria-label="Explanation 版本"></div>
+          <button id="addExplanation" class="tab-add" aria-label="新建 Explanation" title="新建 Explanation">＋</button>
+        </div>
+        <div id="explanationBody" class="explanation-body"></div>
+        <div id="composer" class="composer">
+          <button id="resizeComposer" class="composer-resize" type="button" aria-label="展开输入框" aria-expanded="false" title="展开输入框">⤢</button>
+          <textarea id="prompt" rows="1" placeholder="就这篇论文继续提问…" aria-label="输入问题"></textarea>
+          <div class="composer-controls">
+            <select id="modelPicker" class="model-select" aria-label="选择模型"></select>
+            <span class="composer-spacer"></span>
+            <button id="sendButton" class="send-button" aria-label="发送消息" title="发送消息">➤</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <button id="settingsButton" class="gear" aria-label="设置" title="设置">⚙</button>
+  </section>
+
+  <section id="settings" class="settings-page hidden" aria-label="设置">
+    <button id="backToReader" class="back-button">← 返回阅读台</button>
+    <h1 class="settings-title">设置</h1>
+    <p class="settings-subtitle">管理你的模型提供商、账号和主题偏好。</p>
+    <div class="settings-layout">
+      <nav class="settings-nav" aria-label="设置分类">
+        <button data-settings-target="apiSection" aria-current="true"><span class="nav-icon" aria-hidden="true">◇</span>API Key</button>
+        <button data-settings-target="accountSection"><span class="nav-icon" aria-hidden="true">♙</span>账号</button>
+        <button data-settings-target="themeSection"><span class="nav-icon" aria-hidden="true">◉</span>主题</button>
+      </nav>
+      <div class="settings-content">
+        <section id="apiSection" class="settings-panel">
+          <div class="panel-heading"><div><h2>API Key 提供商</h2><p>配置可用的模型提供商。你可以添加多个提供商，并为每个提供商管理模型。</p></div><button id="addProvider" class="primary-button push">＋ 添加提供商</button></div>
+          <div id="providerList"></div>
+        </section>
+        <section id="accountSection" class="settings-panel hidden">
+          <h2>ChatGPT 账号</h2><p>连接你的 ChatGPT 账号，以在 OpenRead 中使用你的订阅权益。</p>
+          <div class="account-status"><span class="status-dot" aria-hidden="true">●</span><strong id="accountStatus">未登录</strong><button id="accountAction">登录账号</button></div>
+        </section>
+        <section id="themeSection" class="settings-panel hidden">
+          <h2>主题</h2><p>自定义 OpenRead 的外观。</p>
+          <div class="theme-options">
+            <label class="theme-option"><input type="radio" name="theme" value="system"><span class="theme-preview system" aria-hidden="true"></span><span class="theme-label"><strong>跟随系统</strong><small>随系统设置自动切换</small></span></label>
+            <label class="theme-option"><input type="radio" name="theme" value="light"><span class="theme-preview" aria-hidden="true"></span><span class="theme-label"><strong>浅色</strong><small>明亮、清晰的外观</small></span></label>
+            <label class="theme-option"><input type="radio" name="theme" value="dark"><span class="theme-preview dark" aria-hidden="true"></span><span class="theme-label"><strong>深色</strong><small>适合低光环境</small></span></label>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <dialog id="authDialog" class="dialog">
+    <h2>ChatGPT 登录</h2><p>Demo 将模拟浏览器授权。正式应用会打开系统浏览器完成登录。</p>
+    <div class="dialog-actions"><button data-close-dialog>取消</button><button id="completeAuth" class="primary-button">模拟授权完成</button></div>
+  </dialog>
+  <dialog id="accountDialog" class="dialog">
+    <h2>ChatGPT 账号</h2><p>当前为本地交互演示，不会连接账号。</p>
+    <div class="dialog-actions"><button data-close-dialog>关闭</button><button id="logout" class="primary-button">退出登录</button></div>
+  </dialog>
+  <dialog id="keyDialog" class="dialog">
+    <h2>API Key</h2><p>当前 Demo 只记录“已配置”状态，不保存或发送密钥。</p><label>输入 Key<input id="keyInput" type="password" autocomplete="off" placeholder="仅用于演示"></label>
+    <div class="dialog-actions"><button data-close-dialog>取消</button><button id="saveKey" class="primary-button">完成</button></div>
+  </dialog>
+  <dialog id="providerDialog" class="dialog">
+    <h2>添加 API 服务商</h2><p>Demo 中仅在当前页面临时保存配置，不会发送请求。请勿填写真实密钥。</p>
+    <label class="provider-fields"><span>名称</span><input id="newProviderName" placeholder="例如 OpenAI"></label>
+    <label class="provider-fields"><span>Base URL</span><select id="providerPreset"><option value="">选择服务商</option><option value="OpenAI|https://api.openai.com/v1">OpenAI</option><option value="DeepSeek|https://api.deepseek.com/v1">DeepSeek</option><option value="OpenRouter|https://openrouter.ai/api/v1">OpenRouter</option><option value="custom">自定义</option></select></label>
+    <label class="provider-fields"><span>Base URL</span><input id="newProviderUrl" placeholder="https://api.example.com/v1"></label>
+    <label class="provider-fields"><span>API Key</span><input id="newProviderKey" type="password" placeholder="仅演示遮罩，不会保存"></label>
+    <div class="dialog-actions"><button data-close-dialog>取消</button><button id="saveProvider" class="primary-button">添加服务商</button></div>
+  </dialog>
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script>
+    const byId = id => document.getElementById(id);
+    const state = {
+      page: 'welcome',
+      signedIn: false,
+      theme: 'system',
+      activeSetting: 'apiSection',
+      split: .5,
+      activeSource: 'sample-paper',
+      activeExplanation: 'explanation-1',
+      sources: [
+        { id: 'sample-paper', name: '论文.pdf', sample: true },
+        { id: 'sample-slides', name: '讲义.pdf', sample: true }
+      ],
+      explanations: [
+        { id: 'explanation-1', name: '讲解 1', title: '论文解读：基于检索增强的大语言模型知识问答方法' },
+        { id: 'explanation-2', name: '讲解 2', title: '补充讲解：检索增强生成的工作流程' }
+      ],
+      providers: [
+        { id: 'openai', name: 'OpenAI', baseURL: 'https://api.openai.com/v1', hasKey: true, enabled: true, models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'o4-mini'], collapsed: false }
+      ],
+      serial: 3,
+      toastTimer: 0,
+      streamTimer: 0,
+      streamText: ''
+    };
+
+    function setPage(page) {
+      state.page = page;
+      byId('welcome').classList.toggle('hidden', page !== 'welcome');
+      byId('reader').classList.toggle('hidden', page !== 'reader');
+      byId('settings').classList.toggle('hidden', page !== 'settings');
+      if (page === 'reader') renderReader();
+      if (page === 'settings') renderSettings();
+    }
+    function toast(message) {
+      const item = byId('toast');
+      item.textContent = message;
+      item.classList.remove('hidden');
+      clearTimeout(state.toastTimer);
+      state.toastTimer = setTimeout(() => item.classList.add('hidden'), 3000);
+    }
+    function makeTab(item, type) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'tab' + (item.id === (type === 'source' ? state.activeSource : state.activeExplanation) ? ' active' : '');
+      wrapper.setAttribute('role', 'presentation');
+      const select = document.createElement('button');
+      select.type = 'button'; select.className = 'tab-label'; select.textContent = item.name; select.title = item.name;
+      select.setAttribute('role', 'tab'); select.setAttribute('aria-selected', String(wrapper.classList.contains('active')));
+      select.onclick = () => { if (type === 'source') state.activeSource = item.id; else state.activeExplanation = item.id; renderReader(); };
+      const close = document.createElement('button');
+      close.type = 'button'; close.className = 'tab-close'; close.textContent = '×'; close.setAttribute('aria-label', '关闭 ' + item.name);
+      close.onclick = () => removeTab(type, item.id);
+      wrapper.append(select, close);
+      return wrapper;
+    }
+    function removeTab(type, id) {
+      const list = type === 'source' ? state.sources : state.explanations;
+      const item = list.find(entry => entry.id === id);
+      if (!item || !confirm('关闭「' + item.name + '」？')) return;
+      const index = list.indexOf(item);
+      list.splice(index, 1);
+      const activeKey = type === 'source' ? 'activeSource' : 'activeExplanation';
+      if (state[activeKey] === id) state[activeKey] = list[Math.min(index, list.length - 1)]?.id ?? null;
+      if (type === 'source' && item.url) URL.revokeObjectURL(item.url);
+      renderReader();
+    }
+    function sourceMarkup() {
+      return `<article class="source-paper">
+        <h1>基于检索增强的大语言模型知识问答方法</h1>
+        <div class="authors">李明¹，王芳¹，张伟²<br>¹ 清华大学计算机科学与技术系，北京 100084；² 北京大学信息科学技术学院</div>
+        <div class="abstract"><p><strong>摘　要</strong>　大语言模型在开放域问答中展现出强大的能力，但仍面临知识时效性不足和幻觉问题。本文研究基于检索增强的知识问答方法，通过引入外部文献检索，在生成过程中为模型提供可靠的知识支撑。结果表明，检索增强能够提升模型回答的准确性和可解释性。</p><p><strong>关键词：</strong>大语言模型；检索增强；知识问答；文本生成</p></div>
+        <h2>1　引言</h2><p>近年来，大语言模型在自然语言处理领域取得了显著进展，被广泛应用于问答、写作和知识辅助等任务。然而，受限于训练数据的覆盖范围和时效性，模型在回答专业性和时效性较强的问题时，仍然容易产生事实性错误。</p><p>检索增强生成（Retrieval-Augmented Generation, RAG）方法通过在生成前引入外部检索，为模型提供相关的、可验证的知识来源，已成为提升大语言模型可靠性的重要途径。</p>
+        <h2>2　方法</h2><h3>2.1　整体框架</h3><p>本文提出的检索增强知识问答方法由检索模块和生成模块两部分组成。首先，根据用户问题在外部文献库中检索相关文档，然后将检索到的文档与问题一并输入语言模型，生成最终答案。</p>
+        <div class="diagram"><span>用户问题</span><span>→</span><span>检索模块</span><span>→</span><span>相关文档</span><span>→</span><span>生成模块</span><span>→</span><span>答案</span></div>
+        <h3>2.2　相关工作</h3><p>先前研究表明，将检索到的证据与问题共同提供给语言模型，可以提高回答的事实一致性，并让读者回到原始材料核实依据。</p><h2>3　实验结论</h2><p>在多个领域的数据集上，检索增强方法在回答准确性和可解释性方面表现稳定。</p>
+      </article>`;
+    }
+    function explanationMarkup(item) {
+      return `<article><h1>${escapeHtml(item.title)}</h1>
+        <p>这篇论文研究如何通过检索增强（RAG）提升大语言模型在知识问答中的表现。作者的核心思路是：在模型生成答案之前，先从外部文献中检索与问题相关的资料，并将检索结果与问题一起输入模型，从而让模型基于更可靠的知识来源生成回答。</p>
+        <h2>核心方法</h2><p>方法由两个模块组成：</p><ul><li><strong>检索模块：</strong>根据用户问题，从外部文献库中找到相关文档。</li><li><strong>生成模块：</strong>将检索到的文档与问题一起输入大语言模型，生成最终答案。</li></ul>
+        <h2>实验结论</h2><p>作者在多个领域数据集上进行了实验。结果表明，与不使用检索的基线方法相比，检索增强能提升回答的准确性，并让生成结果更容易解释。</p>
+      </article>`;
+    }
+    function escapeHtml(value) { return value.replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
+    function renderReader() {
+      const sourceStrip = byId('sourceTabs'); sourceStrip.replaceChildren();
+      for (const source of state.sources) sourceStrip.append(makeTab(source, 'source'));
+      const sourceContent = byId('sourceContent'); sourceContent.replaceChildren();
+      const activeSource = state.sources.find(source => source.id === state.activeSource);
+      if (!activeSource) {
+        sourceContent.className = 'source-body source-empty';
+        sourceContent.innerHTML = '<span class="empty-plus" aria-hidden="true">＋</span><strong>导入文档</strong><small>点击此处或上方的 ＋ 选择 PDF</small>';
+        sourceContent.onclick = () => byId('fileInput').click();
+      } else if (activeSource.sample) {
+        sourceContent.className = 'source-body'; sourceContent.innerHTML = sourceMarkup();
+      } else {
+        sourceContent.className = 'source-body';
+        const frame = document.createElement('iframe'); frame.className = 'pdf-frame'; frame.title = activeSource.name; frame.src = activeSource.url; sourceContent.append(frame);
+      }
+      const explanationStrip = byId('explanationTabs'); explanationStrip.replaceChildren();
+      for (const item of state.explanations) explanationStrip.append(makeTab(item, 'explanation'));
+      const explanationBody = byId('explanationBody');
+      const activeExplanation = state.explanations.find(item => item.id === state.activeExplanation);
+      if (!activeExplanation) explanationBody.innerHTML = '<div class="explanation-empty"><h2>开始新的讲解</h2><span>在下方输入内容开始对话。</span></div>';
+      else explanationBody.innerHTML = explanationMarkup(activeExplanation);
+      renderModelPicker();
+    }
+    function renderModelPicker() {
+      const picker = byId('modelPicker'); const selected = picker.value; picker.replaceChildren();
+      if (state.signedIn) picker.add(new Option('ChatGPT · 示例模型', 'chatgpt'));
+      for (const provider of state.providers) if (provider.enabled) for (const model of provider.models) if (model.trim()) picker.add(new Option(provider.name + ' · ' + model, provider.id + '|' + model));
+      if (!picker.options.length) picker.add(new Option('请在设置添加模型', ''));
+      if ([...picker.options].some(option => option.value === selected)) picker.value = selected;
+    }
+    function renderSettings() {
+      renderProviders();
+      document.querySelectorAll('[name="theme"]').forEach(radio => radio.checked = radio.value === state.theme);
+      byId('accountStatus').textContent = state.signedIn ? '已登录' : '未登录';
+      byId('accountAction').textContent = state.signedIn ? '管理账号' : '登录账号';
+      document.querySelectorAll('[data-settings-target]').forEach(button => {
+        const active = button.dataset.settingsTarget === state.activeSetting;
+        button.setAttribute('aria-current', String(active));
+        byId(button.dataset.settingsTarget).classList.toggle('hidden', !active);
+      });
+    }
+    function renderProviders() {
+      const list = byId('providerList'); list.replaceChildren();
+      if (!state.providers.length) { const empty = document.createElement('p'); empty.className = 'empty-providers'; empty.textContent = '还没有添加 API 提供商。'; list.append(empty); return; }
+      state.providers.forEach(provider => {
+        const card = document.createElement('section'); card.className = 'provider-card';
+        const header = document.createElement('div'); header.className = 'provider-header';
+        const expand = document.createElement('button'); expand.className = 'provider-expand'; expand.setAttribute('aria-expanded', String(!provider.collapsed));
+        expand.innerHTML = `<span aria-hidden="true">${provider.collapsed ? '›' : '⌄'}</span><span class="provider-symbol" aria-hidden="true">⬡</span><span>${escapeHtml(provider.name || '新服务商')}</span><span class="provider-state ${provider.enabled ? '' : 'off'}">${provider.enabled ? '已启用' : '已停用'}</span>`;
+        expand.onclick = () => { provider.collapsed = !provider.collapsed; renderProviders(); };
+        const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.className = 'switch'; toggle.checked = provider.enabled; toggle.setAttribute('aria-label', '启用 ' + provider.name); toggle.onchange = () => { provider.enabled = toggle.checked; renderProviders(); renderModelPicker(); };
+        const more = document.createElement('button'); more.className = 'provider-more'; more.textContent = '⋯'; more.setAttribute('aria-label', '删除 ' + provider.name); more.onclick = () => { if (confirm('删除提供商「' + provider.name + '」？')) { state.providers = state.providers.filter(item => item !== provider); renderProviders(); renderModelPicker(); } };
+        header.append(expand, toggle, more); card.append(header);
+        if (!provider.collapsed) {
+          const fields = document.createElement('div'); fields.className = 'provider-fields';
+          fields.append(providerField('名称', provider.name, value => { provider.name = value; renderModelPicker(); }, 'text'));
+          fields.append(providerField('Base URL', provider.baseURL, value => provider.baseURL = value, 'url'));
+          const keyLabel = document.createElement('label'); keyLabel.innerHTML = '<span>API Key</span>';
+          const keyValue = document.createElement('input'); keyValue.readOnly = true; keyValue.value = provider.hasKey ? '********' : ''; keyValue.placeholder = provider.hasKey ? '' : '点击设置'; keyValue.className = 'masked-key'; keyValue.setAttribute('aria-label','API Key，固定遮罩显示'); keyValue.title = '点击设置或更换 API Key'; keyValue.onclick = () => { state.editingProvider = provider; byId('keyInput').value = ''; byId('keyDialog').showModal(); byId('keyInput').focus(); }; keyLabel.append(keyValue); fields.append(keyLabel); card.append(fields);
+          const divider = document.createElement('div'); divider.className = 'provider-divider'; card.append(divider);
+          const modelHeading = document.createElement('div'); modelHeading.className = 'models-heading'; modelHeading.innerHTML = '<span>模型（' + provider.models.length + '）</span>';
+          const addModel = document.createElement('button'); addModel.className = 'quiet-button push'; addModel.textContent = '＋ 添加模型'; addModel.onclick = () => { provider.models.push(''); renderProviders(); };
+          modelHeading.append(addModel); card.append(modelHeading);
+          const modelList = document.createElement('div'); modelList.className = 'model-list';
+          provider.models.forEach((model, index) => {
+            const row = document.createElement('div'); row.className = 'model-row';
+            const input = document.createElement('input'); input.value = model; input.placeholder = '模型 ID'; input.setAttribute('aria-label', '模型 ID ' + (index + 1)); input.oninput = () => { provider.models[index] = input.value; renderModelPicker(); };
+            const edit = document.createElement('button'); edit.textContent = '✎'; edit.setAttribute('aria-label', '编辑模型'); edit.onclick = () => { input.focus(); input.select(); };
+            const remove = document.createElement('button'); remove.textContent = '♧'; remove.setAttribute('aria-label', '删除模型'); remove.onclick = () => { if (confirm('删除模型「' + model + '」？')) { provider.models.splice(index, 1); renderProviders(); renderModelPicker(); } };
+            row.append(input, edit, remove); modelList.append(row);
+          });
+          card.append(modelList);
+        }
+        list.append(card);
+      });
+    }
+    function providerField(label, value, oninput, type) {
+      const wrapper = document.createElement('label'); const title = document.createElement('span'); title.textContent = label;
+      const input = document.createElement('input'); input.type = type; input.value = value; input.setAttribute('aria-label', label);
+      input.oninput = () => oninput(input.value); wrapper.append(title, input); return wrapper;
+    }
+    function addSources(files) {
+      const pdfs = [...files].filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+      if (!pdfs.length) { toast('当前 Demo 只演示 PDF 导入。'); return; }
+      for (const file of pdfs) state.sources.push({ id: crypto.randomUUID(), name: file.name, url: URL.createObjectURL(file) });
+      state.activeSource = state.sources.at(-1).id; renderReader();
+    }
+    function addExplanation() {
+      const number = state.serial++;
+      const item = { id: 'explanation-' + number, name: '讲解 ' + number, title: '新的讲解' };
+      state.explanations.push(item); state.activeExplanation = item.id; renderReader(); byId('prompt').focus();
+    }
+    function stopStream() { clearInterval(state.streamTimer); state.streamTimer = 0; byId('sendButton').textContent = '➤'; byId('sendButton').setAttribute('aria-label', '发送消息'); }
+    function sendPrompt() {
+      if (state.streamTimer) { stopStream(); toast('已停止生成。'); return; }
+      const prompt = byId('prompt').value.trim();
+      if (!prompt) { byId('prompt').focus(); return; }
+      if (!byId('modelPicker').value) { toast('请先到设置添加服务商和模型。'); return; }
+      if (!state.activeExplanation) addExplanation();
+      const body = byId('explanationBody');
+      body.insertAdjacentHTML('beforeend', '<section class="chat-response"><p><strong>你</strong></p><p>' + escapeHtml(prompt) + '</p><p><strong>OpenRead</strong></p><p id="streamText"></p></section>');
+      byId('prompt').value = '';
+      byId('sendButton').textContent = '■'; byId('sendButton').setAttribute('aria-label', '停止生成');
+      const reply = '这是界面交互演示中的模拟流式回复。正式版本会连接你选择的服务商和模型。'; let index = 0;
+      state.streamTimer = setInterval(() => { index += 1; byId('streamText').textContent = reply.slice(0, index); body.scrollTop = body.scrollHeight; if (index >= reply.length) stopStream(); }, 32);
+    }
+    function closeFileMenu() { byId('fileMenu').classList.add('hidden'); byId('fileMenuButton').setAttribute('aria-expanded', 'false'); }
+
+    byId('welcomeChatGPT').onclick = () => byId('authDialog').showModal();
+    byId('welcomeApi').onclick = () => { setPage('reader'); toast('可以稍后到设置添加 API Key。'); };
+    byId('completeAuth').onclick = () => { state.signedIn = true; byId('authDialog').close(); setPage('reader'); toast('已模拟完成 ChatGPT 授权。'); };
+    byId('accountAction').onclick = () => state.signedIn ? byId('accountDialog').showModal() : byId('authDialog').showModal();
+    byId('logout').onclick = () => { state.signedIn = false; byId('accountDialog').close(); renderSettings(); renderModelPicker(); toast('已退出演示账号。'); };
+    byId('settingsButton').onclick = () => setPage('settings');
+    byId('backToReader').onclick = () => setPage('reader');
+    byId('fileMenuButton').onclick = () => { const menu = byId('fileMenu'); const opening = menu.classList.contains('hidden'); menu.classList.toggle('hidden', !opening); byId('fileMenuButton').setAttribute('aria-expanded', String(opening)); };
+    document.addEventListener('click', event => { if (!event.target.closest('.menu-wrap')) closeFileMenu(); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeFileMenu(); });
+    byId('fileMenu').onclick = event => { const action = event.target.closest('[data-action]')?.dataset.action; if (!action) return; closeFileMenu(); toast(action === 'open-acr' ? 'ACR 导入将在后续阶段接入。' : '请先导入 Source 和讲解，再导出 ACR。'); };
+    byId('addSource').onclick = () => byId('fileInput').click();
+    byId('fileInput').onchange = event => { addSources(event.target.files); event.target.value = ''; };
+    byId('addExplanation').onclick = addExplanation;
+    byId('sendButton').onclick = sendPrompt;
+    byId('prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendPrompt(); } };
+    document.querySelectorAll('[data-settings-target]').forEach(button => button.onclick = () => { state.activeSetting = button.dataset.settingsTarget; renderSettings(); });
+    byId('resizeComposer').onclick = () => {
+      const expanded = byId('resizeComposer').getAttribute('aria-expanded') !== 'true';
+      byId('composer').classList.toggle('expanded', expanded);
+      byId('resizeComposer').setAttribute('aria-expanded', String(expanded));
+      byId('resizeComposer').setAttribute('aria-label', expanded ? '收起输入框' : '展开输入框');
+      byId('resizeComposer').title = expanded ? '收起输入框' : '展开输入框';
+    };
+    document.querySelectorAll('[name="theme"]').forEach(radio => radio.onchange = () => { state.theme = radio.value; document.documentElement.dataset.theme = state.theme; });
+    byId('splitter').onpointerdown = event => { if (event.button === 0) byId('splitter').setPointerCapture(event.pointerId); };
+    byId('splitter').onpointermove = event => { if (!byId('splitter').hasPointerCapture(event.pointerId)) return; const rect = byId('readerLayout').getBoundingClientRect(); state.split = Math.max(.3, Math.min(.7, (event.clientX - rect.left - 5) / (rect.width - 10))); byId('readerLayout').style.gridTemplateColumns = `minmax(0, ${state.split}fr) 10px minmax(0, ${1 - state.split}fr)`; byId('splitter').setAttribute('aria-valuenow', Math.round(state.split * 100)); };
+    byId('splitter').onkeydown = event => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); state.split = Math.max(.3, Math.min(.7, state.split + (event.key === 'ArrowRight' ? .03 : -.03))); byId('readerLayout').style.gridTemplateColumns = `minmax(0, ${state.split}fr) 10px minmax(0, ${1 - state.split}fr)`; byId('splitter').setAttribute('aria-valuenow', Math.round(state.split * 100)); };
+    byId('addProvider').onclick = () => { byId('providerDialog').showModal(); byId('newProviderName').focus(); };
+    byId('providerPreset').onchange = event => { const [name, url] = event.target.value.split('|'); if (name) byId('newProviderName').value = name; if (url) byId('newProviderUrl').value = url; if (event.target.value === 'custom') { byId('newProviderName').focus(); } };
+    byId('saveProvider').onclick = () => {
+      const name = byId('newProviderName').value.trim(); const baseURL = byId('newProviderUrl').value.trim();
+      if (!name || !baseURL) { toast('请填写服务商名称和 Base URL。'); return; }
+      state.providers.push({ id: crypto.randomUUID(), name, baseURL, hasKey: Boolean(byId('newProviderKey').value.trim()), enabled: true, models: [], collapsed: false });
+      byId('providerDialog').close(); byId('newProviderName').value = ''; byId('newProviderUrl').value = ''; byId('newProviderKey').value = ''; byId('providerPreset').value = '';
+      renderSettings(); renderModelPicker(); toast('服务商已添加。');
+    };
+    byId('saveKey').onclick = () => { if (!byId('keyInput').value.trim()) { toast('请输入演示用的任意字符，或取消。'); return; } state.editingProvider.hasKey = true; byId('keyInput').value = ''; byId('keyDialog').close(); renderProviders(); toast('已记录 Key 配置状态，演示没有保存密钥。'); };
+    document.querySelectorAll('[data-close-dialog]').forEach(button => button.onclick = () => button.closest('dialog').close());
+    document.documentElement.dataset.theme = state.theme;
+    renderReader();
+  </script>
+</body>
+</html>

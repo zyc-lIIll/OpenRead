@@ -1,0 +1,5 @@
+/desktop/frontend/node_modules/
+/desktop/frontend/dist/
+/desktop/backend/target/
+/desktop/backend/gen/
+.env
