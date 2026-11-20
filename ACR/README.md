@@ -1,6 +1,6 @@
 # ACR 开发者公约（草案）
 
-ACR（Annotation Co-Reading）用于把原始材料和阅读成果装进一份可传送、可由兼容阅读器读取的文件。当前方案是 ZIP 容器和 JSON 元数据；本文件描述草案方向，不代替尚未完成的正式格式规范。
+ACR（Annotation Co-Reading）用于把原始材料和阅读成果装进一份可传送、可由兼容阅读器读取的文件。当前方案是 ZIP 容器和 JSON 元数据；本文件描述草案方向，不代替尚未完成的正式格式规范。应用中的 ACR 导入/导出尚未实现。
 
 ## 容器示例
 
@@ -8,18 +8,21 @@ ACR（Annotation Co-Reading）用于把原始材料和阅读成果装进一份�
 物理笔记.acr
 ├── manifest.json        格式版本、材料清单和相对路径
 ├── sources/             原始 PDF、PPTX 等文件
-├── explanations/        各版本讲解数据
-├── annotations.json     批注、对话和父子关系
+├── conversations/       主对话及 Annotation 详细讨论
+├── explanations/        Explanation 文档/版本
+├── annotations.json     批注、便签、锚点和父子关系
 └── attachments/         框选截图等阅读附件
 ```
 
 ## 数据关系
 
 - `manifest.json` 声明格式版本、稳定 ID 和容器内文件路径。
-- Source 保留原文件；Explanation 作为独立版本保存，并可引用原文位置。
-- Annotation 记录类型（`comment` 或 `question`）、锚点、完整讨论及父子关系。子批注可指向父讨论中的具体回复。
+- Source 保留原文件；所有主对话、Explanation 和便签均持久化，并可引用原文位置。
+- Annotation 记录类型（`comment` 或 `question`）、锚点、完整讨论及父子关系。Agent 生成的便签与产生它的 Annotation 关联；用户应能从便签找到详细讨论。子批注可指向父讨论中的具体回复。
 - 定位信息按格式选择合适方式，例如 PDF 原文 ID 与实际页序，或章节、段落锚点。PDF 框选额外保存页内坐标和截图。
 - ACR 不保存账号凭据或 API Key。阅读所需的图片等附件随包保存。
+
+上述文件布局和数据关系仍是产品目标，具体 JSON schema 与正式兼容性规范尚待确定。
 
 ## 读写要求
 

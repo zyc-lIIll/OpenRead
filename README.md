@@ -2,7 +2,24 @@
 
 OpenRead 是一款以文档为单位的 AI 辅助阅读器，最终目标是 Windows 桌面应用。用户把教材、课件或笔记放进同一个工作区，左侧阅读原文，右侧阅读讲解；遇到疑问时，从原文或讲解打开浮窗继续讨论。
 
-## 阅读工作区
+不仅局限于单一学科。可以跨度各种学科、各种阅读任务。
+
+当前阶段优先把 OpenAI API 和 ChatGPT 登录渠道的阅读体验做好。联网搜索、图片搜索、扫描/OCR，以及更多大型厂商和第三方服务商的适配留待后续阶段。
+
+## 当前实现状态
+
+| 功能 | 当前状态 |
+| --- | --- |
+| 桌面 UI | 已有基本应用框架、欢迎/设置入口和 Source/Explanation 双栏框架；当前右侧承载基础聊天，不是讲解文档界面。 |
+| PDF | 已实现 PDF 导入、阅读和按页文本解析；PDF.js 也提供选区、截图及定位接口。 |
+| 模型对话 | 已实现基础文本对话、模型列表和 API 请求路由；当前聊天仅在应用运行时保留，不关联文档、不写入 ACR。 |
+| 思考强度 | 聊天框尚未提供 ChatGPT 思考强度选择，后端请求也尚未支持该参数。 |
+| Agent 功能 | 尚未实现 Source 初始化、文档上下文组装、Explanation 生成、Annotation 问答/便签、Agent 工具或会话保存。基础模型对话不等于 Agent 工作流。 |
+| 其他格式与 ACR | 目标格式还包括 Markdown、TXT、EPUB、DOC/DOCX、PPT/PPTX；当前应用仅支持 PDF。ACR 仍是格式设计，应用读写尚未实现。 |
+
+下文标记为“产品目标”或“草案”的内容用于描述计划行为，不代表当前已经可用。
+
+## 阅读工作区：产品目标
 
 - **Source** 保存并只读呈现原始文件。可以导入多份材料并用标签切换。目标格式包括 PDF、Markdown、TXT、EPUB、DOC/DOCX 和 PPT/PPTX。
 - **Explanation** 是独立的讲解文档，可生成概览、详细讲解或自定义内容。每次生成都建立新版本；讲解可按章节阅读，并通过引用回到原文。
@@ -12,14 +29,14 @@ OpenRead 是一款以文档为单位的 AI 辅助阅读器，最终目标是 Win
 
 ## 聊天入口与模型路由
 
-Explanation 对话和 Annotation 浮窗使用同一套聊天交互。用户选择的 ChatGPT 账户或 API 服务商决定模型请求走哪条渠道，不改变聊天界面。
+产品目标是让 Explanation 主对话和 Annotation 浮窗共用同一套聊天交互。当前只有阅读台右侧的基础聊天界面；尚无 Explanation 或 Annotation Agent 工作流。用户选择的 ChatGPT 账户或 API 服务商决定模型请求走哪条渠道，不改变聊天界面。
 
-- 最多登录一个 ChatGPT 账号。登录后默认使用该账号的 ChatGPT 额度；用户仍可在设置中切换为优先使用 API 服务商。
+- 最多同时登录一个 ChatGPT 账号。设置的「账号」页显示当前账号、额度授权状态和模型来源开关：开关打开时只显示 ChatGPT 模型，关闭时只显示已配置的 API 服务商模型。开关不会退出账号；登录且额度授权成功后默认使用 ChatGPT，用户切换到 API 后会记住选择。未来增加其他登录来源时，同一时刻最多只能选择一个登录来源。
 - 未登录时，使用用户配置的服务商和模型。欢迎页选择「使用 API Key」可先进入阅读台，之后再配置服务商。
-- 模型选择器显示「服务商名称 + 模型」；选择结果决定实际请求路由。ChatGPT 模型还可选择思考强度。
+- 模型选择器显示「服务商名称 + 模型」；选择结果决定实际请求路由。当前已有 ChatKit React 界面和 Rust 本机模型请求服务，可进行基础文本对话；线程只保存在运行期间，不关联 Source，也不写入 ACR。聊天框尚无思考强度选项，联网/图片搜索、附件、文档上下文和 Agent 工作流均未接入。
 - 服务商配置保存在本机 JSON 中，包含名称、Base URL、API Key 和模型。界面用星号遮住 API Key；遮罩只影响显示，不加密 JSON 文件。密钥不得写入 ACR、日志、样例或 Git。
 
-## 批注与 PDF 选区
+## 批注与 PDF 选区：产品目标
 
 产品只使用一种浮窗聊天，随入口附上不同上下文：
 
@@ -31,11 +48,30 @@ Explanation 对话和 Annotation 浮窗使用同一套聊天交互。用户选�
 
 PDF 页面右键菜单提供「对本页聊天」和「框选区域聊天」。框选复用同一浮窗；截图显示在输入框上方，用户可先移除截图、输入问题再发送。框选只比整页提问多保存页内坐标和截图；坐标用于重新定位，截图随 ACR 保存。原始文件不被修改。选区锚点与浮窗位置分别管理。
 
-## ACR 文件
+## ACR 文件：产品目标
 
-ACR（Annotation Co-Reading）是 OpenRead 的开放文件格式。一份 `.acr` 计划用 ZIP 容器和 JSON 数据带走原件、讲解版本、批注树、引用和阅读附件。复制到另一台电脑后，OpenRead 或兼容阅读器可以在没有原目录、账号和缓存的情况下显示已有内容。凭据不进入 ACR。
+ACR（Annotation Co-Reading）是 OpenRead 的开放文件格式。一份 `.acr` 计划用 ZIP 容器和 JSON 数据带走 Source 原件、所有主对话、讲解和便签、Annotation 的完整讨论与树状关系、引用和阅读附件。便签与产生它的 Annotation 关联；打开便签后应能找到对应的详细讨论。复制到另一台电脑后，OpenRead 或兼容阅读器可以在没有原目录、账号和缓存的情况下显示已有内容。凭据不进入 ACR。当前尚未实现 ACR 读写。
 
 格式草案、读写约束和兼容性验证说明见 [`ACR/README.md`](ACR/README.md)。跨阅读器兼容性仍需用同一份公开样例验证。
+
+## 产品逻辑目标（待实现与细化）
+
+以下是目标产品流程，不是当前已实现功能：
+
+- Source 初始化：导入文档后，在文档界面提供“初始化该文档”入口。初始化用于准备后续阅读上下文，不等于生成 Explanation。
+
+  目标是让 Agent 理解文档概念和结构，或知道应从何处查找相关定义。短文档可评估整体提交；长文档可按页码或位置分段，并在每段之间携带、修订大纲和后续阅读重点。是否能直接将文件交给 OpenAI 处理文字与图片，还是需要本地解析后分段，目前尚未决定；初始化提示词也是草案。
+
+- 主对话（Explanation）：用户可以要求概览、逐页详细讲解或自定义内容。用户也可以另开主对话，提出较大的补充知识主题；Agent 结合 Source 说明相关知识在原文中的用法。
+
+  如果 Annotation 中的问题需要长篇补充讲解，Agent 可以建议转到主对话，由用户决定是否迁移。
+
+- Annotation：从 Source、主对话或已有 Annotation 中选中文字/公式，也可选择 PDF 页面或框选区域，再打开同一套浮窗聊天。浮窗上下文随入口附上原文选区、页面内容或区域截图。
+  - `comment` 表示想法、评论或灵感，Agent 通过交流帮助用户继续思考。
+  - `question` 表示疑问，Agent 负责解释。
+  - 用户不必先判断类型；Agent 在讨论中自动整理便签。问题便签按问题记录“问题 + 回答”；评论便签保留用户想法，并可补充对话中形成的有用提示。便签不替代完整 Annotation 讨论。
+
+- ACR：采用 ZIP + JSON；目标是保存所有 Source、主对话、讲解、便签及其关系，并保留便签对应的完整 Annotation 细节，便于从便签回到原讨论。
 
 ## 技术与目录
 
@@ -45,16 +81,18 @@ ACR（Annotation Co-Reading）是 OpenRead 的开放文件格式。一份 `.acr`
 desktop/
   frontend/
     app_ui/                   欢迎页、设置、双栏工作区
-    source_ui/                原文预览与阅读交互
+    source/PDF/               PDF 阅读、选区坐标和截图
+    source_ui/                通用原文阅读 UI
     agent_ui/
       explanation_ui/         讲解入口、正文和版本切换
       annotation_ui/          选区入口、浮窗和批注摘要
       chat_ui/                共用聊天渲染、输入和模型选择
   backend/
-    agent/                    共享 Agent 循环
-      explanation/            讲解工作流
-      annotation/              批注问答工作流
+    agent/                    ChatKit 本机模型请求；未来承载共享 Agent 工作流
+      explanation/            讲解工作流（未实现）
+      annotation/              批注问答工作流（未实现）
     source/                   文档导入与解析
+      PDF/                    PDF 文件分段读取和解析接口
     annotation/               批注锚点、关系和保存
     ai-verification/          ChatGPT 登录授权
     providers/                服务商 JSON、Key 验证和模型调用
@@ -72,3 +110,21 @@ tests/                        应用测试和专用夹具
 ## 发布
 
 正式 Windows 安装包计划通过 [GitHub Releases](https://github.com/zyc-lIIll/OpenRead/releases) 按版本分发。
+
+## Windows 首版本地构建
+
+在具备 Node.js、Rust MSVC 工具链和 Tauri Windows 构建依赖的 Windows x64 环境下，通过 PowerShell 运行：
+
+```powershell
+cd desktop/frontend
+npm ci
+npm run tauri -- dev
+```
+
+运行 `npm run tauri -- build` 可在 `desktop/backend/target/release/bundle/nsis/` 生成安装包。
+
+在欢迎页选择 **Sign in with ChatGPT** 打开系统浏览器，按提示登录并选择是否授予额度使用权限。回到 OpenRead 后，在「设置 → 账号」查看账号状态、切换模型来源，或使用最右侧的“退出登录”和“重新登录”按钮。额度授权成功后默认选择 ChatGPT 来源；也可以关闭开关改用 API Key。欢迎页选择「使用 API Key」可直接进入阅读台。
+
+在左侧 Source 的「＋」或「文件 → 导入 PDF」中选择一份或多份 PDF。点击文件标签切换文档，可滚动阅读、按实际页序跳转、缩放和选择文字。PDF 阅读与文本提取可离线使用。文件标签随应用退出结束，原件保留。
+
+PDF 按页读取接口供后续的 Annotation 和 Explanation 使用。扫描页仍可阅读和截图，文字提取依赖文件本身的文本层。
