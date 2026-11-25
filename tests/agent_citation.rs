@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::super::super::model::WebCitation;
 use super::super::super::tool::SourceCitation;
 use super::Formatter;
 
@@ -52,11 +53,19 @@ fn malformed_or_unclosed_markers_do_not_consume_the_rest_of_the_answer() {
 
 #[test]
 fn only_http_and_https_search_citations_are_attached() {
-    let output = vec![serde_json::json!({"content":[{"annotations":[
-        {"type":"url_citation","url":"https://example.com/paper","title":"Paper","start_index":7,"end_index":12},
-        {"type":"url_citation","url":"javascript:alert(1)","title":"bad","start_index":8,"end_index":9}
-    ]}]})];
-    let annotations = super::external_annotations(&output, &Formatter::default(), 0);
+    let citations = vec![
+        WebCitation {
+            title: "Paper".into(),
+            url: "https://example.com/paper".into(),
+            index: 12,
+        },
+        WebCitation {
+            title: "bad".into(),
+            url: "javascript:alert(1)".into(),
+            index: 9,
+        },
+    ];
+    let annotations = super::external_annotations(&citations, &Formatter::default(), 0);
     assert_eq!(annotations.len(), 1);
     assert_eq!(annotations[0]["source"]["url"], "https://example.com/paper");
     assert_eq!(annotations[0]["index"], 12);
@@ -78,10 +87,12 @@ fn web_citation_offsets_are_adjusted_after_hidden_source_markers() {
         formatter.push("Claim [[cite:r1]] and web source", &refs),
         "Claim  and web source"
     );
-    let output = vec![serde_json::json!({"content":[{"annotations":[
-        {"type":"url_citation","url":"https://example.com","title":"web","start_index":22,"end_index":32}
-    ]}]})];
-    let annotation = super::external_annotations(&output, &formatter, 0)
+    let citations = vec![WebCitation {
+        title: "web".into(),
+        url: "https://example.com".into(),
+        index: 32,
+    }];
+    let annotation = super::external_annotations(&citations, &formatter, 0)
         .pop()
         .unwrap();
     assert_eq!(annotation["index"], 21);
@@ -93,10 +104,12 @@ fn web_citation_offsets_include_prior_model_turns() {
     formatter.push("Earlier answer. ", &HashMap::new());
     let raw_offset = formatter.raw_chars();
     formatter.push("web result", &HashMap::new());
-    let output = vec![serde_json::json!({"content":[{"annotations":[
-        {"type":"url_citation","url":"https://example.com","title":"web","start_index":0,"end_index":10}
-    ]}]})];
-    let annotation = super::external_annotations(&output, &formatter, raw_offset)
+    let citations = vec![WebCitation {
+        title: "web".into(),
+        url: "https://example.com".into(),
+        index: 10,
+    }];
+    let annotation = super::external_annotations(&citations, &formatter, raw_offset)
         .pop()
         .unwrap();
     assert_eq!(annotation["index"], 26);
@@ -106,15 +119,19 @@ fn web_citation_offsets_include_prior_model_turns() {
 fn web_citations_include_prior_output_messages_in_the_same_turn() {
     let mut formatter = Formatter::default();
     formatter.push("First. Second.", &HashMap::new());
-    let output = vec![serde_json::json!({"content":[
-        {"type":"output_text","text":"First.","annotations":[
-            {"type":"url_citation","url":"https://example.com/one","title":"one","end_index":6}
-        ]},
-        {"type":"output_text","text":"Second.","annotations":[
-            {"type":"url_citation","url":"https://example.com/two","title":"two","end_index":7}
-        ]}
-    ]})];
-    let annotations = super::external_annotations(&output, &formatter, 0);
+    let citations = vec![
+        WebCitation {
+            title: "one".into(),
+            url: "https://example.com/one".into(),
+            index: 6,
+        },
+        WebCitation {
+            title: "two".into(),
+            url: "https://example.com/two".into(),
+            index: 13,
+        },
+    ];
+    let annotations = super::external_annotations(&citations, &formatter, 0);
     assert_eq!(annotations[0]["index"], 6);
     assert_eq!(annotations[1]["index"], 13);
 }

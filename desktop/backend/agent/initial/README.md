@@ -20,4 +20,4 @@ PDF 页面文字和 PNG 图像在同一轮请求中发送。每段最多 12,000 
 
 成功时返回 Markdown、联网引用和阅读限制说明；取消时返回 `cancelled`。初始化期间通过进度通道报告当前页和阶段，`cancel_source_initialization` 可取消任务。成功的概览保存在前端阅读器状态和后端 `Workspace` 内存中，使 Explanation 可通过 `get_overview` 按需读取；移除 Source 或退出应用后清除，不写入 ACR 或本地文件。
 
-提示词、页码建议验证和概览压缩均在 `mod.rs`。供应商请求格式和 SSE 响应解析由共享的 `agent/model/` 处理；格式相关的上下文获取与分段规则留在 `agent/tool/source/`，避免把 PDF 专属逻辑混入初始化工作流。
+提示词、页码建议验证和概览压缩均在 `mod.rs`。初始化将提示词放入统一请求的 `instructions`，把文字和页面图像放入 `input`，并调用 `agent/model/` 中心入口；适配器负责服务商请求转换、发送、SSE 解析和错误归一。图像拒绝后的文字回退及进度/取消仍由初始化工作流处理。格式相关的上下文获取与分段规则留在 `agent/tool/source/`，避免把 PDF 专属逻辑混入模型适配器。

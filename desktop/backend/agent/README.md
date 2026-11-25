@@ -4,17 +4,17 @@
 
 ## 模型适配层
 
-`model/` 是 Chat Completions 与 Responses API 的唯一流式协议适配位置。调用方使用共同的消息、工具调用、文本增量和完整响应；对应模块负责请求体、历史/工具消息序列化、SSE 帧解析、工具调用拼装及 Responses 无状态推理项续传。`initial/` 和 `explanation/` 复用该适配层，不重复处理两种响应格式。当前仍由 `ModelRoute` 决定 API 服务商或 ChatGPT 授权路由，凭据只在后端使用。
+`model/` 是 Agent 工作流使用统一请求和统一响应的唯一入口。`model/mod.rs` 按 `ModelRoute` 选择适配器、发送请求并读取流；`chatgpt.rs` 处理 ChatGPT Responses 协议和不透明续传上下文，`other.rs` 处理通用 API 的 Chat Completions 协议。`initial/` 与 `explanation/` 只构造 `instructions`、`input` 和 `tools`，不拼服务商请求或解析其流。凭据只在后端使用。
 
-模型通过请求中的 `tools` 字段获取实际可调用工具名称、JSON Schema 和说明；system prompt 中的工具注册表只说明使用规则，不能代替 API 请求注册。Chat Completions 和 Responses 的工具定义差异由 `model/` 转换。
+模型通过统一请求中的 `tools` 字段获取实际可调用工具名称、JSON Schema 和说明；system prompt 中的工具注册表只说明使用规则，不能代替请求注册。各适配器负责转换目标 API 的工具定义和输入内容。
 
 ## Explanation 主对话
 
-`explanation/` 在每条用户消息开始时要求模型先调用 `select_workflow`，从五类任务和五种学科视角中选择并命名。后端加载相应的 `explanation/skill/` 与 `agent/skill/` Markdown 指引，再通过共享工具循环完成回答。最多进行 24 轮模型请求、40 次工具调用；输出达到模型 token 上限时最多在同一响应内续写 8 次，最终文本仍逐增量流向 ChatKit。
+`explanation/` 在每条用户消息开始时要求模型先调用 `select_workflow`，从五类任务和五种学科视角中选择并命名。后端加载相应的 `explanation/skill/` 与 `agent/skill/` Markdown 指引，再通过共享工具循环完成回答。普通文本、函数调用和函数结果都使用统一 `input`；Responses 续传项目由模型层保存并作为不透明上下文原样传回。最多进行 24 轮模型请求、40 次工具调用；输出达到模型 token 上限时最多在同一响应内续写 8 次，最终文本仍逐增量流向 ChatKit。
 
-共享 Source 工具位于 `tool/`：`list_sources` 列出当前导入 PDF、`get_overview` 获取首版初始化概览、`read_source` 按页读取 PDF 正文。`read_source` 单次最多 5 页；未初始化的 Source 仍可以读取原文。通用联网搜索目前只由 ChatGPT Responses 路由提供，服务商 API 路由不提供搜索工具。
+共享 Source 工具位于 `tool/`：`list_sources` 列出当前导入 PDF、`get_overview` 获取首版初始化概览、`read_source` 按页读取 PDF 正文。`read_source` 单次最多 5 页；未初始化的 Source 仍可以读取原文。`web_search` 是统一搜索意图；ChatGPT 适配器映射为内建搜索，通用 API 适配器会明确告知模型当前没有搜索实现，不会伪造搜索结果。
 
-引用协议使用 `[[cite:rN]]`。Agent 只允许模型引用当前回复中 `read_source` 返回的编号；后端在流式处理中隐藏标记、验证编号并输出 ChatKit EntitySource 注释。Responses 联网引用转换为 ChatKit URL 注释。原文引用携带 Source ID 与 PDF 页码，点击由前端切换 Source 并跳页。运行时引用不持久化，ACR 尚未接入。
+引用协议使用 `[[cite:rN]]`。Agent 只允许模型引用当前回复中 `read_source` 返回的编号；后端在流式处理中隐藏标记、验证编号并输出 ChatKit EntitySource 注释。联网引用由适配器归一为 URL 和文本位置，再转换为 ChatKit URL 注释。原文引用携带 Source ID 与 PDF 页码，点击由前端切换 Source 并跳页。运行时引用不持久化，ACR 尚未接入。
 
 ## Source 初始化（首版已实现）
 

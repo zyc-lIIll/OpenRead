@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::{
-    model::{decode_frame, frame_end, Event, Format},
+    model::{decode_frame, frame_end, Adapter, Event},
     ModelRoute, RouteRegistry,
 };
 
@@ -9,15 +9,15 @@ use super::{
 fn decodes_fragmented_sse_and_waits_for_terminal_done_event() {
     let mut bytes = include_bytes!("fixtures/chatkit/chat_completions.sse").to_vec();
     let (end, width) = frame_end(&bytes).unwrap();
-    let first = decode_frame(Format::ChatCompletions, &bytes[..end]).unwrap();
+    let first = decode_frame(Adapter::Other, &bytes[..end]).unwrap();
     let consumed = end + width;
     bytes.drain(..consumed);
     let (end, width) = frame_end(&bytes).unwrap();
-    let second = decode_frame(Format::ChatCompletions, &bytes[..end]).unwrap();
+    let second = decode_frame(Adapter::Other, &bytes[..end]).unwrap();
     let consumed = end + width;
     bytes.drain(..consumed);
     let (end, width) = frame_end(&bytes).unwrap();
-    let terminal = decode_frame(Format::ChatCompletions, &bytes[..end]).unwrap();
+    let terminal = decode_frame(Adapter::Other, &bytes[..end]).unwrap();
     let consumed = end + width;
     bytes.drain(..consumed);
     assert!(bytes.is_empty());
@@ -36,7 +36,7 @@ fn chatgpt_response_completes_only_on_terminal_event() {
     }
     let delta = delta.strip_suffix(b"\n").unwrap_or(&delta);
     assert!(
-        matches!(decode_frame(Format::Responses, delta).unwrap().as_slice(), [Event::Text(text)] if text == "Hello")
+        matches!(decode_frame(Adapter::Chatgpt, delta).unwrap().as_slice(), [Event::Text(text)] if text == "Hello")
     );
     let mut completed = Vec::new();
     for line in frames.filter(|line| !line.is_empty()) {
@@ -45,7 +45,7 @@ fn chatgpt_response_completes_only_on_terminal_event() {
     }
     let completed = completed.strip_suffix(b"\n").unwrap_or(&completed);
     assert!(matches!(
-        decode_frame(Format::Responses, completed)
+        decode_frame(Adapter::Chatgpt, completed)
             .unwrap()
             .as_slice(),
         [Event::Completed(_)]

@@ -20,7 +20,7 @@ use tauri::AppHandle;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use super::{AgentState, CompletionEvent, ModelMessage, ReasoningEffort};
+use super::{AgentState, CompletionEvent, ReasoningEffort};
 
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 
@@ -311,7 +311,7 @@ fn stream_response(
     route_id: String,
     user_item: Value,
     created: Option<Value>,
-    history: Vec<ModelMessage>,
+    history: Vec<Value>,
     reasoning_effort: ReasoningEffort,
     origin: &str,
 ) -> Response {
@@ -511,7 +511,7 @@ fn user_message(thread_id: &str, text: &str, route_id: &str) -> Value {
     })
 }
 
-fn model_history(items: &[Value]) -> Vec<ModelMessage> {
+fn model_history(items: &[Value]) -> Vec<Value> {
     items
         .iter()
         .filter_map(|item| {
@@ -526,13 +526,7 @@ fn model_history(items: &[Value]) -> Vec<ModelMessage> {
                 .iter()
                 .filter_map(|part| part.get("text").and_then(Value::as_str))
                 .collect::<String>();
-            Some(ModelMessage {
-                role: role.into(),
-                content,
-                tool_calls: Vec::new(),
-                tool_call_id: None,
-                responses_items: Vec::new(),
-            })
+            Some(super::model::text_message(role, &content))
         })
         .collect()
 }

@@ -87,61 +87,6 @@ pub struct ChatKitConnection {
     token: String,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ModelMessage {
-    pub role: String,
-    pub content: String,
-    pub tool_calls: Vec<model::ModelToolCall>,
-    pub tool_call_id: Option<String>,
-    pub responses_items: Vec<Value>,
-}
-
-impl ModelMessage {
-    pub(crate) fn system(content: String) -> Self {
-        Self {
-            role: "system".into(),
-            content,
-            tool_calls: Vec::new(),
-            tool_call_id: None,
-            responses_items: Vec::new(),
-        }
-    }
-
-    pub(crate) fn user(content: String) -> Self {
-        Self {
-            role: "user".into(),
-            content,
-            tool_calls: Vec::new(),
-            tool_call_id: None,
-            responses_items: Vec::new(),
-        }
-    }
-
-    pub(crate) fn assistant_turn(
-        content: String,
-        tool_calls: Vec<model::ModelToolCall>,
-        responses_items: Vec<Value>,
-    ) -> Self {
-        Self {
-            role: "assistant".into(),
-            content,
-            tool_calls,
-            tool_call_id: None,
-            responses_items,
-        }
-    }
-
-    pub(crate) fn tool_result(call_id: String, content: String) -> Self {
-        Self {
-            role: "tool".into(),
-            content,
-            tool_calls: Vec::new(),
-            tool_call_id: Some(call_id),
-            responses_items: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub(crate) enum CompletionEvent {
     Delta(String),
@@ -343,7 +288,7 @@ pub(crate) async fn stream_completion(
     app: AppHandle,
     state: AgentState,
     route_id: String,
-    messages: Vec<ModelMessage>,
+    messages: Vec<Value>,
     reasoning_effort: ReasoningEffort,
     sender: tokio::sync::mpsc::UnboundedSender<CompletionEvent>,
 ) {
@@ -359,10 +304,6 @@ pub(crate) async fn stream_completion(
     {
         let _ = sender.send(CompletionEvent::Error(error));
     }
-}
-
-fn sse_frame_end(buffer: &[u8]) -> Option<(usize, usize)> {
-    model::frame_end(buffer).map(|(start, width)| (start, start + width))
 }
 
 #[cfg(test)]

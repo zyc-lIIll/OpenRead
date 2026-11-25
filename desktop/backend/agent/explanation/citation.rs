@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use crate::agent::tool::SourceCitation;
+use crate::agent::{model::WebCitation, tool::SourceCitation};
 
 const PREFIX: &str = "[[cite:";
 
@@ -107,57 +107,24 @@ impl Formatter {
 }
 
 pub fn external_annotations(
-    output: &[Value],
+    citations: &[WebCitation],
     formatter: &Formatter,
     raw_offset: usize,
 ) -> Vec<Value> {
-    let mut annotations = Vec::new();
-    let mut message_offset = 0;
-    for item in output {
-        let Some(parts) = item.get("content").and_then(Value::as_array) else {
-            continue;
-        };
-        let part_text_len = parts
-            .iter()
-            .filter(|part| part.get("type").and_then(Value::as_str) == Some("output_text"))
-            .filter_map(|part| part.get("text").and_then(Value::as_str))
-            .map(|text| text.chars().count())
-            .sum::<usize>();
-        let mut part_offset = 0;
-        for part in parts {
-            let current_part_offset = part_offset;
-            part_offset += part
-                .get("text")
-                .and_then(Value::as_str)
-                .map(|text| text.chars().count())
-                .unwrap_or(0);
-            let Some(refs) = part.get("annotations").and_then(Value::as_array) else {
-                continue;
-            };
-            for reference in refs {
-                let Some(url) = reference.get("url").and_then(Value::as_str) else {
-                    continue;
-                };
-                let Ok(parsed) = url::Url::parse(url) else {
-                    continue;
-                };
-                if !matches!(parsed.scheme(), "http" | "https") {
-                    continue;
-                }
-                let end = reference
-                    .get("end_index")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as usize;
-                annotations.push(json!({
-                    "type":"annotation",
-                    "source":{"type":"url","url":parsed.as_str(),"title":reference.get("title").and_then(Value::as_str).unwrap_or(url)},
-                    "index":formatter.adjusted_index(raw_offset + message_offset + current_part_offset + end)
-                }));
+    citations
+        .iter()
+        .filter_map(|citation| {
+            let parsed = url::Url::parse(&citation.url).ok()?;
+            if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
+                return None;
             }
-        }
-        message_offset += part_text_len;
-    }
-    annotations
+            Some(json!({
+                "type":"annotation",
+                "source":{"type":"url","url":parsed.as_str(),"title":citation.title},
+                "index":formatter.adjusted_index(raw_offset + citation.index)
+            }))
+        })
+        .collect()
 }
 
 fn annotation(citation: &SourceCitation, index: usize) -> Value {

@@ -29,9 +29,9 @@ pub struct SourceCitation {
 
 pub fn schemas() -> Vec<Value> {
     vec![
-        json!({"name":"list_sources","description":"列出当前已导入的 Source 及页数。每次新会话先调用它确认可用材料。","parameters":{"type":"object","properties":{},"additionalProperties":false}}),
-        json!({"name":"get_overview","description":"读取指定 Source 已生成的 Markdown 概览；未初始化时会明确返回未初始化。","parameters":{"type":"object","properties":{"source_id":{"type":"string"}},"required":["source_id"],"additionalProperties":false}}),
-        json!({"name":"read_source","description":"读取 PDF 指定页范围的原文。每次最多 5 页；结果包含可引用的页码锚点。","parameters":{"type":"object","properties":{"source_id":{"type":"string"},"page_start":{"type":"integer","minimum":1},"page_end":{"type":"integer","minimum":1}},"required":["source_id","page_start","page_end"],"additionalProperties":false}}),
+        json!({"type":"function","name":"list_sources","description":"列出当前已导入的 Source 及页数。每次新会话先调用它确认可用材料。","parameters":{"type":"object","properties":{},"additionalProperties":false}}),
+        json!({"type":"function","name":"get_overview","description":"读取指定 Source 已生成的 Markdown 概览；未初始化时会明确返回未初始化。","parameters":{"type":"object","properties":{"source_id":{"type":"string"}},"required":["source_id"],"additionalProperties":false}}),
+        json!({"type":"function","name":"read_source","description":"读取 PDF 指定页范围的原文。每次最多 5 页；结果包含可引用的页码锚点。","parameters":{"type":"object","properties":{"source_id":{"type":"string"},"page_start":{"type":"integer","minimum":1},"page_end":{"type":"integer","minimum":1}},"required":["source_id","page_start","page_end"],"additionalProperties":false}}),
     ]
 }
 

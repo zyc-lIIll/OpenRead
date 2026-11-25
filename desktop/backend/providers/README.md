@@ -1,21 +1,14 @@
 # API 服务商与模型
 
-`providers` 管理用户配置的 API 服务商、API Key 和模型 ID。配置保存在本机 JSON 中，可同时包含多个服务商。每个服务商包含稳定 ID、名称、Base URL、API Key 和模型 ID 列表；用户可在设置中编辑名称和地址、增删服务商及模型。普通 ChatKit 聊天目前只支持基础文本请求；PDF Source 初始化的文档上下文、图像输入和可选搜索由 `agent/initial/` 处理，并从本模块读取 API 服务商配置。Explanation、Annotation 和通用 Agent 工具尚未实现。
+`providers` 管理用户配置的 API 服务商、API Key 和模型 ID。配置保存在本机 JSON 中，可同时包含多个服务商。每个服务商包含稳定 ID、名称、Base URL、API Key 和模型 ID 列表；用户可在设置中编辑名称和地址、增删服务商及模型。API 模型路由由 `agent/model/other.rs` 适配为通用 Chat Completions 请求，供 Explanation 和 PDF Source 初始化共同使用。该路由不提供通用联网搜索；适配器会明确告诉模型搜索不可用。供应商显示名称不用于猜测专属协议，也不需要额外的适配器标识。
 
 前端只显示 API Key 的星号遮罩，不返回具体 Key 给界面。遮罩只控制显示，不加密本机 JSON 文件；不得把真实 Key 写入 Git、ACR、日志或样例。
 
-聊天模型选择器显示「服务商名称 + 模型名称」，请求使用服务商 ID、Base URL、Key 和模型 ID 路由。ChatGPT 的默认思考强度及聊天框单次选择由 Agent/UI 负责；API Key 路由不传 ChatGPT 专属思考强度。ChatGPT 授权请求由 `ai-verification` 提供，两种渠道复用同一套基础聊天入口和交互。登录 ChatGPT 后也可切换为优先使用 API 服务商。
+聊天模型选择器显示「服务商名称 + 模型名称」，请求使用服务商 ID、Base URL、Key 和模型 ID 路由。ChatGPT 的默认思考强度及聊天框单次选择由 Agent/UI 负责；API Key 路由不传 ChatGPT 专属思考强度。ChatGPT 授权请求由 `ai-verification` 提供，并由独立的 `agent/model/chatgpt.rs` 处理。两种渠道复用同一套统一 Agent 请求和聊天入口；登录 ChatGPT 后也可切换为优先使用 API 服务商。
 
-## 服务商专属适配（后续规划）
+## 服务商协议适配
 
-当各大厂商需要专属的认证、模型目录、请求字段或响应处理时，在本目录按厂商拆分适配文件，不把所有差异堆进通用路由。规划的文件包括：
-
-- `openai.rs`：OpenAI API Key 与模型适配。
-- `glm.rs`：智谱 GLM API Key 与模型适配。
-- `deepseek.rs`：DeepSeek API Key 与模型适配。
-- `claude.rs`：Anthropic Claude API Key 与模型适配。
-
-这些模块目前都未实现，也不创建占位文件。当前统一的 Base URL、Key 和模型配置继续由本 README 描述；厂商专属文件只在对应适配开始实现时加入。
+协议适配归 `agent/model/`，不放在本目录。当前 `other.rs` 将所有配置的 API 服务商按兼容 Chat Completions 的通用接口调用；`chatgpt.rs` 独立处理 ChatGPT 登录路由。只有现有模型路由不足以稳定识别新协议时，才扩展路由标识和兼容旧配置的迁移；不按用户可编辑的服务商名称猜协议，也不创建未实现的占位适配器。
 
 ## 当前本机配置格式
 

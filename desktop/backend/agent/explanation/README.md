@@ -1,6 +1,6 @@
 # Explanation 主对话 Agent（首版已实现）
 
-`explanation/` 是阅读台右侧主对话的 Agent 工作流，ChatKit 请求从 [`../chatkit.rs`](../chatkit.rs) 进入。它复用 [`../model/`](../model/README.md) 的统一模型流接口和 [`../tool/`](../tool/README.md) 的 Source 工具，不直接拼接供应商请求体。
+`explanation/` 是阅读台右侧主对话的 Agent 工作流，ChatKit 请求从 [`../chatkit.rs`](../chatkit.rs) 进入。它构造统一的 `instructions`、`input`、`tools` 请求并调用 [`../model/`](../model/README.md) 中心路由，不直接拼接供应商请求体或解析供应商流。
 
 ## 一轮对话
 
@@ -14,7 +14,7 @@
 
 `system.md` 固定 Agent 职责、安全与证据规则、工作流选择过程及引用协议；`skill/` 按类别补充任务操作指引；`../skill/` 提供选定的学科阅读视角。跨主题或从讨论转完整 Source 讲解时，模型可以建议另开 Explanation，但不能替用户创建。让模型真正知道可调用的工具，需要在每个 API 请求的 `tools` 字段附上函数名、说明和 JSON Schema。system prompt 内的工具注册表便于模型理解职责，但它本身不能启用工具。
 
-Source 工具可以列出当前 PDF、读取可选概览和按页读原文。概览不存在时仍允许读取正文。ChatGPT Responses 路由提供可选 `web_search`；API 服务商路由无通用联网工具。
+Source 工具可以列出当前 PDF、读取可选概览和按页读原文。概览不存在时仍允许读取正文。`web_search` 作为搜索意图交由适配器处理：ChatGPT 适配器提供内建搜索；通用 API 适配器没有搜索实现时会明确告知模型当前不可用。
 
 ## 当前限制
 
