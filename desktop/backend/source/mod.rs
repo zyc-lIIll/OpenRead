@@ -21,6 +21,15 @@ const SUPPORTED_EXTENSIONS: &[&str] = &["pdf"];
 pub struct Workspace {
     root: Arc<tempfile::TempDir>,
     sources: Arc<Mutex<HashMap<Uuid, String>>>,
+    overviews: Arc<Mutex<HashMap<Uuid, String>>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSummary {
+    pub id: String,
+    pub name: String,
+    pub has_overview: bool,
 }
 
 impl Workspace {
@@ -28,6 +37,7 @@ impl Workspace {
         Ok(Self {
             root: Arc::new(tempfile::Builder::new().prefix("openread-").tempdir()?),
             sources: Arc::new(Mutex::new(HashMap::new())),
+            overviews: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -84,7 +94,44 @@ impl Workspace {
             fs::remove_file(self.root.path().join(id.to_string()))
                 .map_err(|_| "无法移除导入副本。")?;
             sources.remove(&id);
+            if let Ok(mut overviews) = self.overviews.lock() {
+                overviews.remove(&id);
+            }
         }
+        Ok(())
+    }
+
+    pub fn list_sources(&self) -> Result<Vec<SourceSummary>, String> {
+        let sources = self.sources.lock().map_err(|_| "无法访问导入工作区。")?;
+        let overviews = self.overviews.lock().map_err(|_| "无法访问导入工作区。")?;
+        Ok(sources
+            .iter()
+            .map(|(id, name)| SourceSummary {
+                id: id.to_string(),
+                name: name.clone(),
+                has_overview: overviews.contains_key(id),
+            })
+            .collect())
+    }
+
+    pub fn overview(&self, id: Uuid) -> Result<Option<String>, String> {
+        let sources = self.sources.lock().map_err(|_| "无法访问导入工作区。")?;
+        if !sources.contains_key(&id) {
+            return Err("找不到该 Source。".into());
+        }
+        let overviews = self.overviews.lock().map_err(|_| "无法访问导入工作区。")?;
+        Ok(overviews.get(&id).cloned())
+    }
+
+    pub fn set_overview(&self, id: Uuid, markdown: String) -> Result<(), String> {
+        let sources = self.sources.lock().map_err(|_| "无法访问导入工作区。")?;
+        if !sources.contains_key(&id) {
+            return Err("找不到该 Source。".into());
+        }
+        self.overviews
+            .lock()
+            .map_err(|_| "无法访问导入工作区。")?
+            .insert(id, markdown);
         Ok(())
     }
 

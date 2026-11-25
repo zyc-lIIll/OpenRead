@@ -3,7 +3,7 @@ use std::{collections::HashSet, future::Future, time::Duration};
 use futures_util::StreamExt;
 use reqwest::{Response, StatusCode};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::{ipc::Channel, AppHandle, Manager, State};
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -15,7 +15,8 @@ use crate::{
 };
 
 use super::{
-    source::pdf::{self as pdf_context, PageImage, PageRange, Segment, SegmentBuilder},
+    model::{self, Event as ModelEvent, Format},
+    tool::source::pdf::{self as pdf_context, PageImage, PageRange, Segment, SegmentBuilder},
     AgentState, ModelRoute, ReasoningEffort,
 };
 
@@ -177,11 +178,14 @@ pub async fn initialize_source(
     )
     .await
     {
-        Ok(output) => Ok(InitResult::Completed {
-            markdown: output.markdown,
-            citations: output.citations,
-            notes: output.notes,
-        }),
+        Ok(output) => {
+            workspace.set_overview(source_uuid, output.markdown.clone())?;
+            Ok(InitResult::Completed {
+                markdown: output.markdown,
+                citations: output.citations,
+                notes: output.notes,
+            })
+        }
         Err(InitFailure::Cancelled) => Ok(InitResult::Cancelled),
         Err(InitFailure::Error(error)) => Err(error),
     }
@@ -985,10 +989,12 @@ async fn send_model_request(
                 .state::<providers::Store>()
                 .agent_provider_model(provider_id, model_id)
                 .map_err(InitFailure::Error)?;
-            let messages = json!([
-                {"role": "system", "content": instructions},
-                {"role": "user", "content": chat_completion_content(input, images)}
-            ]);
+            let body = model::chat_completions::initial_request_body(
+                model_id,
+                instructions,
+                input,
+                images,
+            );
             state
                 .client
                 .post(format!(
@@ -996,7 +1002,7 @@ async fn send_model_request(
                     provider.base_url.trim_end_matches('/')
                 ))
                 .bearer_auth(provider.api_key)
-                .json(&json!({"model": model_id, "messages": messages, "stream": true}))
+                .json(&body)
         }
         ModelRoute::Chatgpt {
             model_id,
@@ -1014,20 +1020,14 @@ async fn send_model_request(
             .map_err(|_| InitFailure::Error("无法读取 ChatGPT 授权。".into()))?
             .map_err(InitFailure::Error)?
             .ok_or_else(|| InitFailure::Error("请先登录并授权使用 ChatGPT 额度。".into()))?;
-            let mut body = json!({
-                "model": model_id,
-                "instructions": instructions,
-                "input": [{"role": "user", "content": responses_input_content(input, images)}],
-                "store": false,
-                "stream": true
-            });
-            if use_search {
-                body["tools"] = json!([{ "type": "web_search" }]);
-                body["tool_choice"] = json!("auto");
-            }
-            if let Some(effort) = reasoning_effort.api_value() {
-                body["reasoning"] = json!({"effort": effort});
-            }
+            let body = model::responses::initial_request_body(
+                model_id,
+                instructions,
+                input,
+                images,
+                reasoning_effort.api_value(),
+                use_search,
+            );
             state
                 .client
                 .post("https://api.openai.com/v1/responses")
@@ -1043,38 +1043,14 @@ async fn send_model_request(
     })
 }
 
+#[cfg(test)]
 fn chat_completion_content(input: &str, images: &[PageImage]) -> Value {
-    if images.is_empty() {
-        return Value::String(input.into());
-    }
-    let mut content = vec![json!({"type": "text", "text": input})];
-    for image in images {
-        content.push(json!({
-            "type": "text",
-            "text": format!("【第 {} 页页面图像】", image.page_number)
-        }));
-        content.push(json!({
-            "type": "image_url",
-            "image_url": {"url": image.data_url.as_str(), "detail": "auto"}
-        }));
-    }
-    Value::Array(content)
+    model::chat_completions::content(input, images)
 }
 
+#[cfg(test)]
 fn responses_input_content(input: &str, images: &[PageImage]) -> Vec<Value> {
-    let mut content = vec![json!({"type": "input_text", "text": input})];
-    for image in images {
-        content.push(json!({
-            "type": "input_text",
-            "text": format!("【第 {} 页页面图像】", image.page_number)
-        }));
-        content.push(json!({
-            "type": "input_image",
-            "image_url": image.data_url.as_str(),
-            "detail": "auto"
-        }));
-    }
-    content
+    model::responses::input_content(input, images)
 }
 
 async fn send_with_cancel(
@@ -1167,67 +1143,36 @@ fn handle_frame(
     current_page: u32,
     total_pages: u32,
 ) -> Result<bool, InitFailure> {
-    let frame = String::from_utf8_lossy(frame);
-    let event_name = frame
-        .lines()
-        .find_map(|line| line.strip_prefix("event:"))
-        .map(str::trim);
-    let data = frame
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:"))
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join("\n");
-    if data.is_empty() {
-        return Ok(false);
-    }
-    if !is_responses && data == "[DONE]" {
-        return Ok(true);
-    }
-    let value: Value = serde_json::from_str(&data)
-        .map_err(|_| InitFailure::Error("模型返回了无效的流式数据。".into()))?;
-    if !is_responses {
-        if let Some(delta) = value
-            .pointer("/choices/0/delta/content")
-            .and_then(Value::as_str)
-        {
-            append_delta(text, delta)?;
-        }
-        return Ok(false);
-    }
-
-    let name = value.get("type").and_then(Value::as_str).or(event_name);
-    match name {
-        Some("response.output_text.delta") => {
-            if let Some(delta) = value.get("delta").and_then(Value::as_str) {
-                append_delta(text, delta)?;
+    let format = if is_responses {
+        Format::Responses
+    } else {
+        Format::ChatCompletions
+    };
+    for event in model::decode_frame(format, frame).map_err(InitFailure::Error)? {
+        match event {
+            ModelEvent::Text(delta) => append_delta(text, &delta)?,
+            ModelEvent::SearchProgress => {
+                send_progress(progress, "searching", current_page, total_pages)
             }
-            Ok(false)
-        }
-        Some(name) if name.starts_with("response.web_search_call.") => {
-            send_progress(progress, "searching", current_page, total_pages);
-            Ok(false)
-        }
-        Some("response.completed") => {
-            if let Some(output) = value.pointer("/response/output") {
-                collect_citations(output, citations, seen);
-            }
-            Ok(true)
-        }
-        Some("response.failed" | "response.incomplete" | "error") => {
-            let code = value
-                .pointer("/response/error/code")
-                .and_then(Value::as_str);
-            Err(InitFailure::Error(match code {
-                Some("subscription_sharing_usage_limit_exceeded")
-                | Some("subscription_sharing_usage_unavailable") => {
-                    "ChatGPT 额度不足或暂不可用。".into()
+            ModelEvent::Completed(output) => {
+                if let Some(output) = output {
+                    collect_citations(&output, citations, seen);
                 }
-                _ => "ChatGPT 未能完成此次响应。".into(),
-            }))
+                return Ok(true);
+            }
+            ModelEvent::Failed(code) => {
+                return Err(InitFailure::Error(match code.as_deref() {
+                    Some(
+                        "subscription_sharing_usage_limit_exceeded"
+                        | "subscription_sharing_usage_unavailable",
+                    ) => "ChatGPT 额度不足或暂不可用。".into(),
+                    _ => "ChatGPT 未能完成此次响应。".into(),
+                }))
+            }
+            _ => {}
         }
-        _ => Ok(false),
     }
+    Ok(false)
 }
 
 fn append_delta(text: &mut String, delta: &str) -> Result<(), InitFailure> {

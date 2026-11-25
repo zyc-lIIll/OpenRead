@@ -1,36 +1,33 @@
 use std::collections::HashMap;
 
-use tokio::sync::mpsc;
-
 use super::{
-    handle_sse_frame, next_sse_frame, CompletionEvent, ModelRoute, RouteRegistry, StreamKind,
+    model::{decode_frame, frame_end, Event, Format},
+    ModelRoute, RouteRegistry,
 };
 
 #[test]
 fn decodes_fragmented_sse_and_waits_for_terminal_done_event() {
     let mut bytes = include_bytes!("fixtures/chatkit/chat_completions.sse").to_vec();
-    let (sender, mut receiver) = mpsc::unbounded_channel();
-    let (frame, consumed) = next_sse_frame(&bytes).unwrap();
-    assert!(!handle_sse_frame(&frame, &StreamKind::ChatCompletions, &sender).unwrap());
+    let (end, width) = frame_end(&bytes).unwrap();
+    let first = decode_frame(Format::ChatCompletions, &bytes[..end]).unwrap();
+    let consumed = end + width;
     bytes.drain(..consumed);
-    let (frame, consumed) = next_sse_frame(&bytes).unwrap();
-    assert!(!handle_sse_frame(&frame, &StreamKind::ChatCompletions, &sender).unwrap());
+    let (end, width) = frame_end(&bytes).unwrap();
+    let second = decode_frame(Format::ChatCompletions, &bytes[..end]).unwrap();
+    let consumed = end + width;
     bytes.drain(..consumed);
-    let (frame, consumed) = next_sse_frame(&bytes).unwrap();
-    assert!(handle_sse_frame(&frame, &StreamKind::ChatCompletions, &sender).unwrap());
+    let (end, width) = frame_end(&bytes).unwrap();
+    let terminal = decode_frame(Format::ChatCompletions, &bytes[..end]).unwrap();
+    let consumed = end + width;
     bytes.drain(..consumed);
     assert!(bytes.is_empty());
-    assert!(
-        matches!(receiver.try_recv(), Ok(CompletionEvent::Delta(ref value)) if value == "Hello")
-    );
-    assert!(
-        matches!(receiver.try_recv(), Ok(CompletionEvent::Delta(ref value)) if value == " there.")
-    );
+    assert_eq!(first, vec![Event::Text("Hello".into())]);
+    assert_eq!(second, vec![Event::Text(" there.".into())]);
+    assert_eq!(terminal, vec![Event::Completed(None)]);
 }
 
 #[test]
 fn chatgpt_response_completes_only_on_terminal_event() {
-    let (sender, mut receiver) = mpsc::unbounded_channel();
     let mut frames = include_bytes!("fixtures/chatkit/responses.sse").split(|byte| *byte == b'\n');
     let mut delta = Vec::new();
     for line in frames.by_ref().take_while(|line| !line.is_empty()) {
@@ -38,17 +35,21 @@ fn chatgpt_response_completes_only_on_terminal_event() {
         delta.push(b'\n');
     }
     let delta = delta.strip_suffix(b"\n").unwrap_or(&delta);
-    assert!(!handle_sse_frame(delta, &StreamKind::Responses, &sender).unwrap());
+    assert!(
+        matches!(decode_frame(Format::Responses, delta).unwrap().as_slice(), [Event::Text(text)] if text == "Hello")
+    );
     let mut completed = Vec::new();
     for line in frames.filter(|line| !line.is_empty()) {
         completed.extend_from_slice(line);
         completed.push(b'\n');
     }
     let completed = completed.strip_suffix(b"\n").unwrap_or(&completed);
-    assert!(handle_sse_frame(completed, &StreamKind::Responses, &sender).unwrap());
-    assert!(
-        matches!(receiver.try_recv(), Ok(CompletionEvent::Delta(ref value)) if value == "Hello")
-    );
+    assert!(matches!(
+        decode_frame(Format::Responses, completed)
+            .unwrap()
+            .as_slice(),
+        [Event::Completed(_)]
+    ));
 }
 
 #[test]

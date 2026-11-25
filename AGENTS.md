@@ -8,10 +8,10 @@ OpenRead 是面向多学科阅读任务的 Windows 桌面 AI 阅读器。产品�
 
 ## 当前实现基线
 
-- 已有 Windows/Tauri 桌面框架、欢迎页与设置、PDF 导入/阅读/按页解析、Markdown 标题/章节/图片锚点解析、KaTeX 概览渲染、ChatKit 基础聊天，以及 ChatGPT 登录/额度授权和 API 服务商配置与模型路由。
-- 已实现首版 PDF Source 初始化：结合 PDF 文本与页面图像，分段更新临时 Markdown 概览；ChatGPT 路由可在初始化中使用可选联网搜索。概览仅保存在当前阅读器内存中，不进入普通聊天上下文，也不持久化。
-- 普通聊天目前仍是基础文本对话。ChatGPT 思考强度默认值可在设置中选择，聊天框可覆盖；自动/低/中/高已传到 ChatGPT 请求，API Key 路由不显示该选项。Explanation 生成、Annotation 问答/自动便签、普通聊天的 Source 上下文、Agent 通用工具及会话持久化均未实现。
-- 当前仅支持 PDF 导入和原文阅读。Markdown 结构锚点解析已实现，但 Markdown 文件导入/阅读尚未实现；其他文件格式、ACR 应用读写和本地 OCR 尚未实现。扫描 PDF 可把页面图像交给支持视觉输入的模型。通用 Agent 联网搜索也未实现，搜索仅用于 Source 初始化。除非任务明确要求，不要把这些功能顺手加入当前范围。
+- 已有 Windows/Tauri 桌面框架、欢迎页与设置、PDF 导入/阅读/按页解析、Markdown 标题/章节/图片锚点解析、KaTeX 概览渲染、ChatKit，以及 ChatGPT 登录/额度授权和 API 服务商配置与模型路由。
+- 已实现首版 PDF Source 初始化：结合 PDF 文本与页面图像，分段更新 Markdown 概览；ChatGPT 路由可按需联网搜索。概览保存在前端阅读器和后端 Workspace 内存，供 Explanation 工具按需读取；不持久化。
+- 主对话 Explanation Agent 已实现五类工作流选择、学科阅读 skills、共享 Source 工具、模型响应统一适配、长回答工具循环、ChatGPT 路由的联网搜索以及可点击的 PDF 页引用。Annotation 问答/自动便签、Explanation 文档版本和会话持久化尚未实现。ChatGPT 思考强度可在设置中选择并由聊天框覆盖；API Key 路由不显示该选项。
+- 当前仅支持 PDF 导入和原文阅读。Markdown 结构锚点解析已实现，但 Markdown 文件导入/阅读尚未实现；其他文件格式、ACR 应用读写和本地 OCR 尚未实现。扫描 PDF 可把页面图像交给支持视觉输入的模型。通用联网搜索仅由 ChatGPT Responses 路由提供，API Key 路由无搜索。除非任务明确要求，不要把这些功能顺手加入当前范围。
 
 根 README 中标为“目标”或“草案”的内容不是已实现功能。修改文档时明确区分现状、产品约定和待讨论事项。
 
@@ -28,13 +28,13 @@ OpenRead 是面向多学科阅读任务的 Windows 桌面 AI 阅读器。产品�
 ## 代码放置
 
 - `desktop/frontend` 使用 TypeScript、React、CSS 和 Vite。应用框架、欢迎页和设置放 `app_ui`；格式化阅读器和交互放 `source/PDF`、`source/markdown` 等格式目录；通用原文阅读 UI 放 `source_ui`；讲解入口、批注浮窗和共用聊天组件分别放 `agent_ui/explanation_ui`、`agent_ui/annotation_ui`、`agent_ui/chat_ui`。
-- `desktop/backend` 是 Rust/Tauri 本地后端。文档导入、解析和稳定锚点归 `source`；按格式获取和切分 Agent 上下文归 `agent/source`；批注锚点和关系归 `annotation`；讲解和批注工作流分别归 `agent/explanation`、`agent/annotation`；ChatGPT 授权归 `ai-verification`；服务商配置、API Key 验证和模型调用归 `providers`；ACR 读写归 `acr`。
+- `desktop/backend` 是 Rust/Tauri 本地后端。文档导入、解析和稳定锚点归 `source`；供应商请求/响应格式对接归 `agent/model`；共用工具归 `agent/tool`，按格式获取 Agent 上下文归 `agent/tool/source`；讲解和批注工作流分别归 `agent/explanation`、`agent/annotation`；学科共用 skills 归 `agent/skill`，Explanation 工作流 skills 归 `agent/explanation/skill`；批注锚点和关系归 `annotation`；ChatGPT 授权归 `ai-verification`；服务商配置归 `providers`；ACR 读写归 `acr`。
 - 后端管理导入原件和文档数据，前端负责呈现与阅读交互。按格式选成熟引擎；同一引擎能提供预览和文本时优先复用已打开的文档。共用接口描述格式能力，定位结构按格式选择页码、章节或段落锚点。
 - ACR 公约和兼容性样例放顶层 `ACR/`；应用测试和专用夹具放顶层 `tests/`；运行生成物放系统临时目录。
 
 ## 产品约定
 
-- 首阶段聚焦 OpenAI API 和 ChatGPT 登录用户的阅读体验。Source 初始化可在 ChatGPT 路由中按需联网搜索，也可把 PDF 页面图像发送给视觉模型；这不代表普通聊天已具备通用搜索、图像搜索或 Agent 工具。暂不做本地 OCR；其他大型厂商和第三方服务商留待后续阶段。
+- 首阶段聚焦 OpenAI API 和 ChatGPT 登录用户的阅读体验。Source 初始化和 Explanation 可在 ChatGPT 路由中按需联网搜索；Explanation 通过模型 API `tools` 参数注册本机 Source 工具。API Key 路由不提供通用联网搜索。暂不做本地 OCR；其他大型厂商和第三方服务商留待后续阶段。
 - Source 在左，Explanation 在右。原文只读；讲解可按章节阅读，每次重新生成形成新版本，已有批注仍关联原版本。
 - ChatGPT 账号最多登录一个。登录且额度授权成功后默认使用 ChatGPT；用户可切换为 API 服务商，未登录时使用已配置的服务商。渠道只影响可选模型和请求路由，不改变聊天交互。
 - ChatGPT 思考强度默认值在设置中选择，聊天框可对后续请求单独调整；自动模式省略 `reasoning.effort`，低/中/高传入 Responses API。PDF Source 初始化使用默认值。API Key 模型不显示或接收 ChatGPT 专属强度选项；模型不接受明确强度时向用户报错，不自动改值。

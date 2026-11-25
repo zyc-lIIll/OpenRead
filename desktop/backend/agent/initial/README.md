@@ -1,10 +1,10 @@
 # Source 初始化
 
-`initial/` 负责把已导入的 Source 分段交给模型，持续更新一份供后续精读使用的 Markdown 概览。当前只支持 PDF。它不负责文件导入、PDF 解析、Markdown 渲染或持久化；对应职责分别在 `desktop/backend/source/`、`desktop/backend/agent/source/` 和前端阅读器中。
+`initial/` 负责把已导入的 Source 分段交给模型，持续更新一份供后续精读使用的 Markdown 概览。当前只支持 PDF。它不负责文件导入、PDF 解析、Markdown 渲染或持久化；对应职责分别在 `desktop/backend/source/`、`desktop/backend/agent/tool/source/` 和前端阅读器中。
 
 ## 入口与流程
 
-`initialize_source` 接收 Source ID、模型路由 ID、ChatGPT 默认思考强度和进度通道，不接收任意文件路径。后端先通过 `Workspace` 校验 Source，再读取 PDF 页数、逐页文字和页面 PNG。页面上下文及分段规则由 `desktop/backend/agent/source/pdf.rs` 管理，PDF.js 解析桥接位于 `desktop/backend/source/PDF/`。自动模式省略 `reasoning.effort`；低、中、高仅用于 ChatGPT 路由，API Key 请求不带该参数。
+`initialize_source` 接收 Source ID、模型路由 ID、ChatGPT 默认思考强度和进度通道，不接收任意文件路径。后端先通过 `Workspace` 校验 Source，再读取 PDF 页数、逐页文字和页面 PNG。页面上下文及分段规则由 `desktop/backend/agent/tool/source/pdf.rs` 管理，PDF.js 解析桥接位于 `desktop/backend/source/PDF/`。自动模式省略 `reasoning.effort`；低、中、高仅用于 ChatGPT 路由，API Key 请求不带该参数。
 
 每轮模型请求都携带固定 system instructions、上一轮完整概览和当前片段。模型需要返回完整 Markdown 概览及下一部分关注点；只有页边界处才允许建议后续连续页码。后端会校验建议从首个未读页开始、范围不超过 8 页，并从 Markdown 中移除隐藏页码标记。建议缺失或无效时按字符数和页数默认切分。
 
@@ -18,6 +18,6 @@ PDF 页面文字和 PNG 图像在同一轮请求中发送。每段最多 12,000 
 
 ## 返回与生命周期
 
-成功时返回 Markdown、联网引用和阅读限制说明；取消时返回 `cancelled`。初始化期间通过进度通道报告当前页和阶段，`cancel_source_initialization` 可取消任务。当前结果仅由前端阅读器保存在内存中，不写入 ACR 或本地文件；退出应用或移除 Source 后清除。
+成功时返回 Markdown、联网引用和阅读限制说明；取消时返回 `cancelled`。初始化期间通过进度通道报告当前页和阶段，`cancel_source_initialization` 可取消任务。成功的概览保存在前端阅读器状态和后端 `Workspace` 内存中，使 Explanation 可通过 `get_overview` 按需读取；移除 Source 或退出应用后清除，不写入 ACR 或本地文件。
 
-提示词、模型请求、页码建议验证和概览压缩均在 `mod.rs`。格式相关的上下文获取与分段规则留在 `agent/source/`，避免把 PDF 专属逻辑混入初始化工作流。
+提示词、页码建议验证和概览压缩均在 `mod.rs`。供应商请求格式和 SSE 响应解析由共享的 `agent/model/` 处理；格式相关的上下文获取与分段规则留在 `agent/tool/source/`，避免把 PDF 专属逻辑混入初始化工作流。

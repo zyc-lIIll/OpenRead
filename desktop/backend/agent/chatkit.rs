@@ -35,6 +35,7 @@ struct ServerState {
 struct ThreadRecord {
     id: String,
     created_at: String,
+    title: Option<String>,
     items: Vec<Value>,
 }
 
@@ -175,6 +176,7 @@ async fn handle_request(
                 let mut record = ThreadRecord {
                     id: id.clone(),
                     created_at,
+                    title: None,
                     items: Vec::new(),
                 };
                 record.items.push(user_item.clone());
@@ -364,6 +366,7 @@ fn stream_response(
         ));
         let mut cancelled = cancel_rx;
         let mut text = String::new();
+        let mut annotations = Vec::new();
         loop {
             tokio::select! {
                 _ = &mut cancelled => {
@@ -378,12 +381,14 @@ fn stream_response(
                         let update = content_part_delta_event(&assistant_id, &delta);
                         if !send_event(&event_tx, &update).await { return; }
                     }
+                    Some(CompletionEvent::Annotation(annotation)) => annotations.push(annotation),
+                    Some(CompletionEvent::Title(title)) => set_title(&stream_state, &thread_id, title),
                     Some(CompletionEvent::Complete) => {
-                        let item = assistant_item(&assistant_id, &thread_id, &created_at, &text);
+                        let item = assistant_item(&assistant_id, &thread_id, &created_at, &text, &annotations);
                         save_item(&stream_state, &thread_id, item.clone());
                         let _ = send_event(
                             &event_tx,
-                            &content_part_done_event(&assistant_id, &text),
+                            &content_part_done_event(&assistant_id, &text, &annotations),
                         )
                         .await;
                         let _ = send_event(&event_tx, &json!({"type": "thread.item.done", "item": item})).await;
@@ -463,14 +468,14 @@ fn content_part_delta_event(item_id: &str, delta: &str) -> Value {
     })
 }
 
-fn content_part_done_event(item_id: &str, text: &str) -> Value {
+fn content_part_done_event(item_id: &str, text: &str, annotations: &[Value]) -> Value {
     json!({
         "type": "thread.item.updated",
         "item_id": item_id,
         "update": {
             "type": "assistant_message.content_part.done",
             "content_index": 0,
-            "content": {"type": "output_text", "text": text, "annotations": []}
+            "content": {"type": "output_text", "text": text, "annotations": annotations}
         }
     })
 }
@@ -524,6 +529,9 @@ fn model_history(items: &[Value]) -> Vec<ModelMessage> {
             Some(ModelMessage {
                 role: role.into(),
                 content,
+                tool_calls: Vec::new(),
+                tool_call_id: None,
+                responses_items: Vec::new(),
             })
         })
         .collect()
@@ -537,7 +545,7 @@ fn thread_value(thread: &ThreadRecord) -> Value {
     json!({
         "id": thread.id,
         "created_at": thread.created_at,
-        "title": null,
+        "title": thread.title.clone(),
         "status": {"type": "active"},
         "metadata": {},
         "items": page(thread.items.clone())
@@ -548,13 +556,19 @@ fn page(items: Vec<Value>) -> Value {
     json!({"data": items, "after": null, "has_more": false})
 }
 
-fn assistant_item(id: &str, thread_id: &str, created_at: &str, text: &str) -> Value {
+fn assistant_item(
+    id: &str,
+    thread_id: &str,
+    created_at: &str,
+    text: &str,
+    annotations: &[Value],
+) -> Value {
     json!({
         "type": "assistant_message",
         "id": id,
         "thread_id": thread_id,
         "created_at": created_at,
-        "content": [{"type": "output_text", "text": text, "annotations": []}]
+        "content": [{"type": "output_text", "text": text, "annotations": annotations}]
     })
 }
 
@@ -562,7 +576,7 @@ fn save_assistant(state: &ServerState, thread_id: &str, id: &str, text: &str) {
     if text.is_empty() {
         return;
     }
-    let item = assistant_item(id, thread_id, &Utc::now().to_rfc3339(), text);
+    let item = assistant_item(id, thread_id, &Utc::now().to_rfc3339(), text, &[]);
     save_item(state, thread_id, item);
 }
 
@@ -570,6 +584,16 @@ fn save_item(state: &ServerState, thread_id: &str, item: Value) {
     if let Ok(mut threads) = state.threads.lock() {
         if let Some(thread) = threads.get_mut(thread_id) {
             thread.items.push(item);
+        }
+    }
+}
+
+fn set_title(state: &ServerState, thread_id: &str, title: String) {
+    if let Ok(mut threads) = state.threads.lock() {
+        if let Some(thread) = threads.get_mut(thread_id) {
+            if thread.title.is_none() {
+                thread.title = Some(title);
+            }
         }
     }
 }

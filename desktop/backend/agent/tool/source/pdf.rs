@@ -1,7 +1,69 @@
 use std::collections::HashSet;
 
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+use crate::{
+    agent::tool::SourceCitation,
+    source::{pdf as parser, Workspace},
+};
+
 pub const SEGMENT_CHAR_LIMIT: usize = 12_000;
 pub const MAX_PAGE_IMAGES: usize = 8;
+
+pub async fn page_count(
+    bridge: &parser::ParserBridge,
+    workspace: &Workspace,
+    source_id: &str,
+) -> Option<u32> {
+    parser::read_document(bridge, workspace, source_id)
+        .await
+        .ok()
+        .map(|document| document.page_count)
+}
+
+pub async fn read_source(
+    bridge: &parser::ParserBridge,
+    workspace: &Workspace,
+    source_id: Uuid,
+    start: u32,
+    end: u32,
+    citation_index: &mut usize,
+) -> Result<(Value, Vec<SourceCitation>), String> {
+    let source_name = workspace.source_name(source_id)?;
+    let source_id = source_id.to_string();
+    let mut pages = Vec::new();
+    let mut citations = Vec::new();
+    for page in start..=end {
+        let info = parser::read_page(bridge, workspace, &source_id, page).await?;
+        *citation_index += 1;
+        let id = format!("r{}", citation_index);
+        citations.push(SourceCitation {
+            id: id.clone(),
+            source_id: source_id.clone(),
+            source_name: source_name.clone(),
+            page_number: page,
+        });
+        pages.push(json!({"citation_id":id,"anchor":{"source_id":source_id,"kind":"pdf_page","page":page},"text":info.text}));
+    }
+    Ok((json!({"source_id":source_id,"pages":pages}), citations))
+}
+
+pub fn page_range(args: &Value) -> Result<(u32, u32), String> {
+    let start = args
+        .get("page_start")
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n > 0)
+        .ok_or("page_start 必须为正页码。")?;
+    let end = args
+        .get("page_end")
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n >= start && *n - start < 5)
+        .ok_or("页码范围无效；每次最多读取 5 页。")?;
+    Ok((start, end))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageRange {
@@ -237,5 +299,5 @@ fn split_text(text: &str, limit: usize) -> Vec<String> {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/agent_source_pdf.rs"]
+#[path = "../../../../../tests/agent_source_pdf.rs"]
 mod tests;

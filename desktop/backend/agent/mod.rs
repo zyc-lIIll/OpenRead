@@ -1,6 +1,8 @@
 mod chatkit;
+pub mod explanation;
 pub mod initial;
-pub mod source;
+pub mod model;
+pub mod tool;
 
 use std::{
     collections::HashMap,
@@ -9,10 +11,9 @@ use std::{
     time::Duration,
 };
 
-use futures_util::StreamExt;
-use reqwest::{Client, Response};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
@@ -61,7 +62,7 @@ enum ModelSource {
 }
 
 #[derive(Clone)]
-enum ModelRoute {
+pub(crate) enum ModelRoute {
     Api {
         provider_id: String,
         model_id: String,
@@ -90,18 +91,64 @@ pub struct ChatKitConnection {
 pub(crate) struct ModelMessage {
     pub role: String,
     pub content: String,
+    pub tool_calls: Vec<model::ModelToolCall>,
+    pub tool_call_id: Option<String>,
+    pub responses_items: Vec<Value>,
+}
+
+impl ModelMessage {
+    pub(crate) fn system(content: String) -> Self {
+        Self {
+            role: "system".into(),
+            content,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            responses_items: Vec::new(),
+        }
+    }
+
+    pub(crate) fn user(content: String) -> Self {
+        Self {
+            role: "user".into(),
+            content,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            responses_items: Vec::new(),
+        }
+    }
+
+    pub(crate) fn assistant_turn(
+        content: String,
+        tool_calls: Vec<model::ModelToolCall>,
+        responses_items: Vec<Value>,
+    ) -> Self {
+        Self {
+            role: "assistant".into(),
+            content,
+            tool_calls,
+            tool_call_id: None,
+            responses_items,
+        }
+    }
+
+    pub(crate) fn tool_result(call_id: String, content: String) -> Self {
+        Self {
+            role: "tool".into(),
+            content,
+            tool_calls: Vec::new(),
+            tool_call_id: Some(call_id),
+            responses_items: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub(crate) enum CompletionEvent {
     Delta(String),
+    Annotation(Value),
+    Title(String),
     Complete,
     Error(String),
-}
-
-enum StreamKind {
-    ChatCompletions,
-    Responses,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,7 +170,7 @@ impl ReasoningEffort {
         }
     }
 
-    fn api_value(self) -> Option<&'static str> {
+    pub(crate) fn api_value(self) -> Option<&'static str> {
         match self {
             Self::Auto => None,
             Self::Low => Some("low"),
@@ -281,7 +328,7 @@ async fn chatgpt_models(
 }
 
 impl AgentState {
-    fn route(&self, route_id: &str) -> Result<ModelRoute, String> {
+    pub(crate) fn route(&self, route_id: &str) -> Result<ModelRoute, String> {
         self.routes
             .lock()
             .map_err(|_| "模型列表暂不可用。".to_string())?
@@ -300,13 +347,13 @@ pub(crate) async fn stream_completion(
     reasoning_effort: ReasoningEffort,
     sender: tokio::sync::mpsc::UnboundedSender<CompletionEvent>,
 ) {
-    if let Err(error) = stream_completion_inner(
-        &app,
-        &state,
-        &route_id,
-        &messages,
+    if let Err(error) = explanation::stream(
+        app,
+        state,
+        route_id,
+        messages,
         reasoning_effort,
-        &sender,
+        sender.clone(),
     )
     .await
     {
@@ -314,207 +361,8 @@ pub(crate) async fn stream_completion(
     }
 }
 
-async fn stream_completion_inner(
-    app: &AppHandle,
-    state: &AgentState,
-    route_id: &str,
-    messages: &[ModelMessage],
-    reasoning_effort: ReasoningEffort,
-    sender: &tokio::sync::mpsc::UnboundedSender<CompletionEvent>,
-) -> Result<(), String> {
-    let route = state.route(route_id)?;
-    let (response, kind) = match &route {
-        ModelRoute::Api {
-            provider_id,
-            model_id,
-        } => {
-            let provider = app
-                .state::<providers::Store>()
-                .agent_provider_model(provider_id, model_id)?;
-            let messages: Vec<Value> = messages
-                .iter()
-                .map(|message| json!({"role": message.role, "content": message.content}))
-                .collect();
-            let response = state
-                .client
-                .post(format!(
-                    "{}/chat/completions",
-                    provider.base_url.trim_end_matches('/')
-                ))
-                .bearer_auth(provider.api_key)
-                .json(&json!({"model": model_id, "messages": messages, "stream": true}))
-                .send()
-                .await
-                .map_err(|_| "无法连接所选 API 服务商。".to_string())?;
-            (response, StreamKind::ChatCompletions)
-        }
-        ModelRoute::Chatgpt {
-            model_id,
-            registration_id,
-        } => {
-            let service = app.state::<ChatGptService>().inner().clone();
-            let expected_registration_id = registration_id.clone();
-            let token = tauri::async_runtime::spawn_blocking(move || {
-                chatgpt::model_access_token_for(&service, &expected_registration_id)
-            })
-            .await
-            .map_err(|_| "无法读取 ChatGPT 授权。".to_string())??
-            .ok_or_else(|| "请先登录并授权使用 ChatGPT 额度。".to_string())?;
-            let input: Vec<Value> = messages
-                .iter()
-                .map(|message| json!({"role": message.role, "content": message.content}))
-                .collect();
-            let mut body =
-                json!({"model": model_id, "input": input, "store": false, "stream": true});
-            if let Some(effort) = reasoning_effort.api_value() {
-                body["reasoning"] = json!({"effort": effort});
-            }
-            let response = state
-                .client
-                .post("https://api.openai.com/v1/responses")
-                .bearer_auth(token)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|_| "无法连接 ChatGPT。".to_string())?;
-            (response, StreamKind::Responses)
-        }
-    };
-    if !response.status().is_success() {
-        if matches!(route, ModelRoute::Chatgpt { .. })
-            && reasoning_effort.api_value().is_some()
-            && response.status() == reqwest::StatusCode::BAD_REQUEST
-        {
-            return Err(
-                "模型请求失败（HTTP 400）。如果该模型不支持当前思考强度，请改用“自动”后重试。"
-                    .into(),
-            );
-        }
-        return Err(match response.status().as_u16() {
-            401 | 403 => "模型服务拒绝了请求，请检查授权或 API Key。".into(),
-            429 => "模型服务当前请求过多或额度不足。".into(),
-            _ => format!("模型服务请求失败（HTTP {}）。", response.status().as_u16()),
-        });
-    }
-    read_model_stream(response, kind, sender).await
-}
-
-async fn read_model_stream(
-    response: Response,
-    kind: StreamKind,
-    sender: &tokio::sync::mpsc::UnboundedSender<CompletionEvent>,
-) -> Result<(), String> {
-    let mut body = response.bytes_stream();
-    let mut buffer = Vec::new();
-    let mut complete = false;
-    loop {
-        let chunk = tokio::select! {
-            _ = sender.closed() => return Ok(()),
-            chunk = body.next() => chunk,
-        };
-        let Some(chunk) = chunk else { break };
-        let chunk = chunk.map_err(|_| "模型响应流中断。".to_string())?;
-        buffer.extend_from_slice(&chunk);
-        while let Some((frame, consumed)) = next_sse_frame(&buffer) {
-            buffer.drain(..consumed);
-            if handle_sse_frame(&frame, &kind, sender)? {
-                complete = true;
-                break;
-            }
-        }
-        if complete {
-            break;
-        }
-    }
-    if complete {
-        let _ = sender.send(CompletionEvent::Complete);
-        Ok(())
-    } else if sender.is_closed() {
-        Ok(())
-    } else {
-        Err("模型响应流未正常结束。".into())
-    }
-}
-
-fn next_sse_frame(buffer: &[u8]) -> Option<(Vec<u8>, usize)> {
-    let (frame_end, consumed) = sse_frame_end(buffer)?;
-    Some((buffer[..frame_end].to_vec(), consumed))
-}
-
 fn sse_frame_end(buffer: &[u8]) -> Option<(usize, usize)> {
-    let lf = buffer
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|i| (i, 2));
-    let crlf = buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|i| (i, 4));
-    let (start, width) = match (lf, crlf) {
-        (Some(lf), Some(crlf)) => {
-            if lf.0 < crlf.0 {
-                lf
-            } else {
-                crlf
-            }
-        }
-        (Some(found), None) | (None, Some(found)) => found,
-        (None, None) => return None,
-    };
-    Some((start, start + width))
-}
-
-fn handle_sse_frame(
-    frame: &[u8],
-    kind: &StreamKind,
-    sender: &tokio::sync::mpsc::UnboundedSender<CompletionEvent>,
-) -> Result<bool, String> {
-    let frame = String::from_utf8_lossy(frame);
-    let event_name = frame
-        .lines()
-        .find_map(|line| line.strip_prefix("event:"))
-        .map(str::trim);
-    let data = frame
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:"))
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join("\n");
-    if data.is_empty() {
-        return Ok(false);
-    }
-    if matches!(kind, StreamKind::ChatCompletions) && data == "[DONE]" {
-        return Ok(true);
-    }
-    let value: Value =
-        serde_json::from_str(&data).map_err(|_| "模型返回了无效的流式数据。".to_string())?;
-    match kind {
-        StreamKind::ChatCompletions => {
-            if let Some(text) = value
-                .pointer("/choices/0/delta/content")
-                .and_then(Value::as_str)
-            {
-                let _ = sender.send(CompletionEvent::Delta(text.to_string()));
-            }
-            Ok(false)
-        }
-        StreamKind::Responses => {
-            let name = value.get("type").and_then(Value::as_str).or(event_name);
-            match name {
-                Some("response.output_text.delta") => {
-                    if let Some(text) = value.get("delta").and_then(Value::as_str) {
-                        let _ = sender.send(CompletionEvent::Delta(text.to_string()));
-                    }
-                    Ok(false)
-                }
-                Some("response.completed") => Ok(true),
-                Some("response.failed" | "response.incomplete" | "error") => {
-                    Err("ChatGPT 未能完成此次响应。".into())
-                }
-                _ => Ok(false),
-            }
-        }
-    }
+    model::frame_end(buffer).map(|(start, width)| (start, start + width))
 }
 
 #[cfg(test)]

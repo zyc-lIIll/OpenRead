@@ -1,7 +1,5 @@
-# Explanation UI（未实现）
+# Explanation UI
 
-这是目标模块，负责右侧讲解入口、正文、章节导航和版本切换。当前右侧只有基础 ChatKit 聊天界面，并未实现 Explanation 文档、生成流程或版本状态。
+阅读台右侧目前通过 [`../chat_ui/`](../chat_ui/README.md) 提供 Explanation 主对话入口。ChatKit 展示流式回复、可点击的原文页引用和模型选择；引用点击由 `app_ui` 激活对应 Source，并等待 PDF 阅读器就绪后跳页。
 
-目标界面在没有讲解时显示新建讲解入口和快捷 prompt，例如「生成 Source 概要」或「逐页详细讲解」。用户也可以输入自定义要求；聊天渲染与交互复用 `../chat_ui`。
-
-目标行为：每次生成创建新的 Explanation 版本，不覆盖旧版本；正文支持按章节阅读和折叠，引用可以跳回原文位置，已有 Annotation 继续关联其创建时指向的版本。对应 Agent 工作流尚未实现。
+独立 Explanation 文档、按章节阅读、版本生成/切换和与 Annotation 的版本关系尚未实现。当前完整对话只保留在运行期 ChatKit 线程中。

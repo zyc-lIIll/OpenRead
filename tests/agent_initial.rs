@@ -4,7 +4,7 @@ use super::super::sse_frame_end;
 use serde_json::json;
 use tauri::ipc::Channel;
 
-use super::super::source::pdf::{format_page_ranges, PageRange, Segment};
+use super::super::tool::source::pdf::{format_page_ranges, PageRange, Segment};
 use super::super::ModelRoute;
 use super::{
     chat_completion_content, collect_citations, completion_instructions, compression_input,
@@ -113,11 +113,11 @@ fn final_search_instruction_is_added_only_when_search_is_available_for_the_final
 #[test]
 fn image_fallback_and_unreadable_final_input_are_explicit() {
     let images = [
-        super::super::source::pdf::PageImage {
+        super::super::tool::source::pdf::PageImage {
             page_number: 4,
             data_url: "data:image/png;base64,iVBORw0KGgo=".into(),
         },
-        super::super::source::pdf::PageImage {
+        super::super::tool::source::pdf::PageImage {
             page_number: 5,
             data_url: "data:image/png;base64,iVBORw0KGgo=".into(),
         },
@@ -263,11 +263,11 @@ fn output_and_page_range_limits_are_stable() {
 #[test]
 fn request_payloads_pair_text_with_each_page_image() {
     let images = [
-        super::super::source::pdf::PageImage {
+        super::super::tool::source::pdf::PageImage {
             page_number: 2,
             data_url: "data:image/png;base64,iVBORw0KGgo=".into(),
         },
-        super::super::source::pdf::PageImage {
+        super::super::tool::source::pdf::PageImage {
             page_number: 3,
             data_url: "data:image/png;base64,iVBORw0KGgo=".into(),
         },

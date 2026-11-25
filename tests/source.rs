@@ -43,3 +43,20 @@ fn rejects_unsupported_extensions_and_missing_files() {
     assert!(workspace.import(&dir.path().join("missing.pdf")).is_err());
     assert_eq!(fs::read_dir(workspace.root.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn overview_is_scoped_to_workspace_and_removed_with_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = dir.path().join("overview.pdf");
+    fs::write(&pdf, b"%PDF-1.7").unwrap();
+    let workspace = Workspace::new().unwrap();
+    let source = workspace.import(&pdf).unwrap();
+    let id = Uuid::parse_str(&source.id).unwrap();
+    assert_eq!(workspace.overview(id).unwrap(), None);
+    workspace.set_overview(id, "# Paper".into()).unwrap();
+    assert_eq!(workspace.overview(id).unwrap().as_deref(), Some("# Paper"));
+    assert!(workspace.list_sources().unwrap()[0].has_overview);
+    workspace.remove(id).unwrap();
+    assert!(workspace.overview(id).is_err());
+    assert!(workspace.list_sources().unwrap().is_empty());
+}

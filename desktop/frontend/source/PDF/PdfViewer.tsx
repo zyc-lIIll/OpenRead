@@ -146,7 +146,10 @@ export function selectedPdfText(sourceId: string): PdfSelection | undefined {
   return { sourceId, pageNumber: page, rect: normalizedPageRect(geometry.page, geometry.viewport, { x: bounds.left - pageRect.left, y: bounds.top - pageRect.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }), text: selection.toString() };
 }
 
-export function PdfViewer({ sourceId, name, state, onState, initialization }: Props) {
+export function PdfViewer({ sourceId, name, state, onState, initialization, citationJump, onCitationJumped }: Props & {
+  citationJump?: { sourceId: string; pageNumber: number };
+  onCitationJumped?: (sourceId: string) => void;
+}) {
   const scroll = useRef<HTMLDivElement>(null);
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
   const [document, setDocument] = useState<PDFDocumentProxy>();
@@ -214,6 +217,11 @@ export function PdfViewer({ sourceId, name, state, onState, initialization }: Pr
     if (target) scroll.current.scrollTop += target.getBoundingClientRect().top - scroll.current.getBoundingClientRect().top - 16;
   }, [sourceId, pageCount]);
   useEffect(() => { setInputPage(String(state.page)); }, [state.page]);
+  useEffect(() => {
+    if (!citationJump || citationJump.sourceId !== sourceId || !pageCount) return;
+    if (citationJump.pageNumber >= 1 && citationJump.pageNumber <= pageCount) navigator.current(citationJump.pageNumber);
+    onCitationJumped?.(sourceId);
+  }, [citationJump, onCitationJumped, pageCount, sourceId]);
 
   function goToPage(page: number) {
     if (!pageCount) return;
@@ -230,9 +238,8 @@ export function PdfViewer({ sourceId, name, state, onState, initialization }: Pr
   }
   navigator.current = goToPage;
   useEffect(() => {
-    viewerNavigators.set(sourceId, { pageCount, navigate: (page) => navigator.current(page) });
-    return () => { viewerNavigators.delete(sourceId); for (const key of pageGeometry.keys()) if (key.startsWith(`${sourceId}:`)) pageGeometry.delete(key); };
-  }, [sourceId, pageCount]);
+    return () => { for (const key of pageGeometry.keys()) if (key.startsWith(`${sourceId}:`)) pageGeometry.delete(key); };
+  }, [sourceId]);
 
   return <div className="pdf-reader" aria-label={`${name} PDF 阅读器`}>
     <div className="pdf-toolbar" aria-label="PDF 工具栏">
@@ -288,12 +295,4 @@ export function PdfViewer({ sourceId, name, state, onState, initialization }: Pr
       </div> : documentError ? <div className="pdf-loading error" role="alert">{documentError}</div> : <div className="pdf-loading" role="status">正在打开 PDF…</div>}
     </div>
   </div>;
-}
-
-const viewerNavigators = new Map<string, { pageCount: number; navigate: (pageNumber: number) => void }>();
-export function navigatePdfToPage(sourceId: string, pageNumber: number): boolean {
-  const navigate = viewerNavigators.get(sourceId);
-  if (!navigate || !Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > navigate.pageCount) return false;
-  navigate.navigate(pageNumber);
-  return true;
 }

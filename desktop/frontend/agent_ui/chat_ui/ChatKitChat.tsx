@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChatKit, useChatKit, type UseChatKitOptions } from "@openai/chatkit-react";
+import { ChatKit, useChatKit, type Entity, type UseChatKitOptions } from "@openai/chatkit-react";
 import type { Theme } from "../../app_ui/settings";
 import type { ChatModelOption, ModelSource, ReasoningEffort } from "../../app_ui/models";
 import "./chatkit.css";
@@ -27,13 +27,14 @@ function loadChatKitScript() {
   return chatKitScript;
 }
 
-export function ChatKitChat({ connection, models, defaultPreferenceKey, modelSource, reasoningEffort, theme }: {
+export function ChatKitChat({ connection, models, defaultPreferenceKey, modelSource, reasoningEffort, theme, onCitationClick }: {
   connection: ChatKitConnection;
   models: ChatModelOption[];
   defaultPreferenceKey?: string;
   modelSource: ModelSource;
   reasoningEffort: ReasoningEffort;
   theme: Theme;
+  onCitationClick: (entity: Entity) => void;
 }) {
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -54,16 +55,17 @@ export function ChatKitChat({ connection, models, defaultPreferenceKey, modelSou
     <button onClick={() => setAttempt((current) => current + 1)}>重试</button>
   </div>;
   return <ChatKitSession connection={connection} models={models} defaultPreferenceKey={defaultPreferenceKey}
-    modelSource={modelSource} reasoningEffort={reasoningEffort} theme={theme} />;
+    modelSource={modelSource} reasoningEffort={reasoningEffort} theme={theme} onCitationClick={onCitationClick} />;
 }
 
-function ChatKitSession({ connection, models, defaultPreferenceKey, modelSource, reasoningEffort, theme }: {
+function ChatKitSession({ connection, models, defaultPreferenceKey, modelSource, reasoningEffort, theme, onCitationClick }: {
   connection: ChatKitConnection;
   models: ChatModelOption[];
   defaultPreferenceKey?: string;
   modelSource: ModelSource;
   reasoningEffort: ReasoningEffort;
   theme: Theme;
+  onCitationClick: (entity: Entity) => void;
 }) {
   const reasoningEffortRef = useRef(reasoningEffort);
   reasoningEffortRef.current = reasoningEffort;
@@ -97,8 +99,9 @@ function ChatKitSession({ connection, models, defaultPreferenceKey, modelSource,
         ? model.preferenceKey === defaultPreferenceKey
         : index === 0 })),
     },
+    entities: { onClick: onCitationClick },
     thread: { autoScroll: true },
-  }), [connection.url, defaultPreferenceKey, fetchWithToken, models, scheme]);
+  }), [connection.url, defaultPreferenceKey, fetchWithToken, models, onCitationClick, scheme]);
   const { control } = useChatKit(options);
   return <ChatKit control={control} className="chatkit-widget" aria-label="Explanation 对话" />;
 }

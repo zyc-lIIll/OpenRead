@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import type { Entity } from "@openai/chatkit-react";
 import { Channel } from "@tauri-apps/api/core";
 import { call, errorMessage } from "./commands";
 import { Confirm } from "./confirm";
@@ -14,6 +15,7 @@ type ImportResult = { imported: Source[]; errors: string[] };
 type InitProgress = { phase: string; currentPage: number; totalPages: number };
 type SourceOverviewContent = { markdown: string; citations: { title: string; url: string }[]; notes: string[] };
 type InitResult = ({ status: "completed" } & SourceOverviewContent) | { status: "cancelled" };
+type CitationJump = { sourceId: string; pageNumber: number };
 const clamp = (value: number) => Math.min(70, Math.max(30, value));
 
 export function Reader({ hidden, openSettings, modelSource, defaultModels, defaultReasoningEffort, theme }: {
@@ -30,6 +32,7 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmRemoval, setConfirmRemoval] = useState<string>();
+  const [initializationPrompt, setInitializationPrompt] = useState<Source[]>();
   const [errors, setErrors] = useState<string[]>([]);
   const [pdfViewStates, setPdfViewStates] = useState<Record<string, PdfViewState>>({});
   const [parserError, setParserError] = useState("");
@@ -44,9 +47,12 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
   const [chatReasoningEffort, setChatReasoningEffort] = useState<ReasoningEffort>(defaultReasoningEffort);
   const [overviews, setOverviews] = useState<Record<string, SourceOverviewContent>>({});
   const [overviewSourceId, setOverviewSourceId] = useState<string>();
+  const [citationJump, setCitationJump] = useState<CitationJump>();
   const [initializingSourceId, setInitializingSourceId] = useState<string>();
   const [initProgress, setInitProgress] = useState<(InitProgress & { sourceId: string })>();
-  const [initError, setInitError] = useState<{ sourceId: string; message: string }>();
+  const [initErrors, setInitErrors] = useState<Record<string, string>>({});
+  const batchInitialization = useRef(false);
+  const batchCanceled = useRef(false);
   const layout = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const active = sources.find((source) => source.id === activeId);
@@ -119,24 +125,55 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
     if (busy || initializingSourceId) return;
     setBusy(true);
     setErrors([]);
+    let imported: Source[] = [];
     try {
-      const { imported, errors: failed } = await call<ImportResult>("import_sources");
+      const result = await call<ImportResult>("import_sources");
+      imported = result.imported;
       if (imported.length) {
         setSources((current) => [...current, ...imported]);
         setPdfViewStates((current) => Object.fromEntries([...imported.map((source) => [source.id, { page: 1, zoom: 1, fitWidth: 0 } as PdfViewState]), ...Object.entries(current)]));
         setActiveId(imported.at(-1)?.id);
       }
-      setErrors(failed);
+      setErrors(result.errors);
     } catch (err) {
       setErrors([errorMessage(err)]);
     } finally {
       setBusy(false);
+      if (imported.length) setInitializationPrompt(imported);
+    }
+  }
+
+  async function initializeImported(sourcesToInitialize: Source[]) {
+    setInitializationPrompt(undefined);
+    if (!defaultModel) {
+      const message = "当前没有可用模型，请先在设置中配置模型。";
+      setInitErrors((current) => ({
+        ...current,
+        ...Object.fromEntries(sourcesToInitialize.map((source) => [source.id, message])),
+      }));
+      setActiveId(sourcesToInitialize[0]?.id);
+      return;
+    }
+    batchInitialization.current = true;
+    batchCanceled.current = false;
+    const failed: string[] = [];
+    try {
+      for (const source of sourcesToInitialize) {
+        setActiveId(source.id);
+        const completed = await initializeSource(source);
+        if (batchCanceled.current) break;
+        if (!completed) failed.push(source.id);
+      }
+    } finally {
+      batchInitialization.current = false;
+      batchCanceled.current = false;
+      if (failed.length) setActiveId(failed[0]);
     }
   }
 
   async function removeSource(id: string) {
     const target = sources.find((source) => source.id === id);
-    if (!target || busy || initializingSourceId === id) return;
+    if (!target || busy || initializingSourceId) return;
     setConfirmRemoval(undefined);
     setBusy(true);
     setErrors([]);
@@ -148,6 +185,7 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
       setSources(remaining);
       setPdfViewStates((current) => { const next = { ...current }; delete next[id]; return next; });
       setOverviews((current) => { const next = { ...current }; delete next[id]; return next; });
+      setInitErrors((current) => { const next = { ...current }; delete next[id]; return next; });
       if (overviewSourceId === id) setOverviewSourceId(undefined);
       setActiveId((currentId) => currentId === id ? remaining[Math.min(index, remaining.length - 1)]?.id : currentId);
     } catch (err) {
@@ -157,13 +195,13 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
     }
   }
 
-  async function initializeSource(source: Source) {
-    if (initializingSourceId || busy) return;
+  async function initializeSource(source: Source): Promise<boolean> {
+    if ((initializingSourceId || busy) && !batchInitialization.current) return false;
     if (!defaultModel) {
-      setInitError({ sourceId: source.id, message: "当前没有可用模型，请先在设置中配置模型。" });
-      return;
+      setInitErrors((current) => ({ ...current, [source.id]: "当前没有可用模型，请先在设置中配置模型。" }));
+      return false;
     }
-    setInitError(undefined);
+    setInitErrors((current) => { const next = { ...current }; delete next[source.id]; return next; });
     setInitializingSourceId(source.id);
     setInitProgress({ sourceId: source.id, phase: "reading", currentPage: 0, totalPages: 0 });
     const progress = new Channel<InitProgress>();
@@ -177,9 +215,12 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
       });
       if (result.status === "completed") {
         setOverviews((current) => ({ ...current, [source.id]: result }));
+        return true;
       }
+      return false;
     } catch (err) {
-      setInitError({ sourceId: source.id, message: errorMessage(err) });
+      setInitErrors((current) => ({ ...current, [source.id]: errorMessage(err) }));
+      return false;
     } finally {
       setInitializingSourceId(undefined);
       setInitProgress(undefined);
@@ -187,12 +228,26 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
   }
 
   async function cancelInitialization(sourceId: string) {
+    if (batchInitialization.current) batchCanceled.current = true;
     try {
       await call("cancel_source_initialization", { sourceId });
     } catch (err) {
-      setInitError({ sourceId, message: errorMessage(err) });
+      setInitErrors((current) => ({ ...current, [sourceId]: errorMessage(err) }));
     }
   }
+
+  const openCitation = useCallback((entity: Entity) => {
+    const sourceId = entity.data?.sourceId;
+    const pageNumber = Number(entity.data?.pageNumber);
+    if (!sourceId || !sources.some((source) => source.id === sourceId) || !Number.isInteger(pageNumber) || pageNumber < 1) return;
+    setOverviewSourceId(undefined);
+    setCitationJump({ sourceId, pageNumber });
+    setActiveId(sourceId);
+  }, [sources]);
+
+  const clearCitationJump = useCallback((sourceId: string) => {
+    setCitationJump((current) => current?.sourceId === sourceId ? undefined : current);
+  }, []);
 
   function resize(event: PointerEvent<HTMLDivElement>) {
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
@@ -216,7 +271,7 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
             {sources.map((source) => <div key={source.id} className="source-tab" data-source-id={source.id} data-active={source.id === activeId}>
               <button className="tab" aria-pressed={source.id === activeId} disabled={!!initializingSourceId && initializingSourceId !== source.id}
                 title={source.name} onClick={() => setActiveId(source.id)}>{source.name}</button>
-              <button className="quiet tab-trash" onClick={() => setConfirmRemoval(source.id)} disabled={busy || initializingSourceId === source.id}
+              <button className="quiet tab-trash" onClick={() => setConfirmRemoval(source.id)} disabled={busy || !!initializingSourceId}
                 title={`移除「${source.name}」`} aria-label={`移除「${source.name}」`}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
                   <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" />
@@ -233,11 +288,12 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
           <div className="pdf-viewer-shell" hidden={overviewSourceId === active.id}>
             <PdfViewer key={active.id} sourceId={active.id} name={active.name} state={pdfViewStates[active.id] ?? { page: 1, zoom: 1, fitWidth: 0 }}
               onState={(state) => setPdfViewStates((current) => ({ ...current, [active.id]: state }))}
+              citationJump={citationJump} onCitationJumped={clearCitationJump}
               initialization={{
                 hasOverview: !!overviews[active.id],
                 busy: initializingSourceId === active.id,
                 progress: initProgress?.sourceId === active.id ? initProgress : undefined,
-                error: initError?.sourceId === active.id ? initError.message : "",
+                error: initErrors[active.id] ?? "",
                 disabled: busy || !parserReady || chatModelsLoading || !defaultModel || (!!initializingSourceId && initializingSourceId !== active.id),
                 initialize: () => void initializeSource(active),
                 viewOverview: () => setOverviewSourceId(active.id),
@@ -275,7 +331,7 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
             </select>
           </label>}
           <ChatKitChat connection={chatkitConnection} models={chatModels} defaultPreferenceKey={defaultModel?.preferenceKey}
-            modelSource={modelSource} reasoningEffort={chatReasoningEffort} theme={theme} />
+            modelSource={modelSource} reasoningEffort={chatReasoningEffort} theme={theme} onCitationClick={openCitation} />
           {(chatModelsLoading || connectionError || chatModelsError || chatModels.length === 0) && <div className="chatkit-banner" role={connectionError || chatModelsError ? "alert" : "status"}>
             {connectionError || chatModelsError ? <>
               <span>{connectionError || chatModelsError}</span>
@@ -297,6 +353,10 @@ export function Reader({ hidden, openSettings, modelSource, defaultModels, defau
     </div>
     {confirmRemoval && pendingRemoval && <Confirm message={`移除「${pendingRemoval.name}」？原文件会保留。`}
       action="移除" cancel={() => setConfirmRemoval(undefined)} confirm={() => void removeSource(confirmRemoval)} />}
+    {initializationPrompt && <Confirm className="source-initial-prompt"
+      message="如果不进行 Source 初始化，可能影响 Explanation 的体验。是否对本次导入的所有 Source 进行初始化？"
+      action="是" cancelLabel="否" cancel={() => setInitializationPrompt(undefined)}
+      confirm={() => void initializeImported(initializationPrompt)} />}
     <button className="quiet gear" onClick={() => { setMenuOpen(false); openSettings(); }} disabled={!!initializingSourceId}
       aria-label="设置" title="设置">⚙</button>
   </main>;

@@ -79,14 +79,15 @@ fn assistant_stream_adds_content_before_delta_and_finishes_in_order() {
     let actual = [
         content_part_added_event("message_fixture"),
         content_part_delta_event("message_fixture", "Hello"),
-        content_part_done_event("message_fixture", "Hello"),
+        content_part_done_event("message_fixture", "Hello", &[]),
         serde_json::json!({
             "type": "thread.item.done",
             "item": assistant_item(
                 "message_fixture",
                 "thread_fixture",
                 "2026-01-01T00:00:00Z",
-                "Hello"
+                "Hello",
+                &[]
             )
         }),
     ];
