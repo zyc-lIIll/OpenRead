@@ -1,11 +1,15 @@
 # Source 导入与解析
 
-`source` 当前负责 PDF 导入和本次运行期间的原始文件副本；PDF 阅读器与解析接口位于 `desktop/frontend/source/PDF/` 和 `desktop/backend/source/PDF/`。原始文件保持只读。Markdown、TXT、EPUB、DOC/DOCX、PPT/PPTX 是产品目标格式，尚未实现导入或解析。
+`desktop/backend/source/` 负责文档导入、底层解析接口和原文定位锚点。它不负责前端呈现，也不负责给 Agent 组织上下文。OpenRead 的 Source 分成三处：
 
-不要自行从头实现文档解析器；按格式选用成熟且支持所需阅读与批注锚点的引擎。解析可放在最适合该引擎的一侧；同一引擎能提供预览和文本时，优先复用已打开的文档。
+- `desktop/backend/source/`：导入文档、解析各格式内容，并确定可回到原文的位置锚点，例如 PDF 页序和 Markdown 标题层级。
+- `desktop/frontend/source/`：呈现解析结果，并负责阅读时的选中文字、页面或区域等交互。
+- `desktop/backend/agent/source/`：按格式从解析结果获取、组织和切分模型上下文，不实现底层文件解析。
 
-共用接口描述格式能力，不强行统一定位结构：PDF 和幻灯片按实际页序定位，EPUB 和 Markdown 可按章节或段落定位，其他格式采用合适的稳定锚点。
+当前仅支持 PDF 导入。顶层维护本次运行期间的只读原文件副本；`PDF/` 暴露分页读取和异步解析桥接。PDF.js 在前端运行，提供 PDF 文字、版面信息及 PNG 页面图像，后端校验请求并提供 Source 读取接口。扫描页没有文字层时返回空文字，可将页面图像交给视觉模型；当前不做本地 OCR。
 
-该目录顶层当前实现 PDF 导入流程。原生文件选择器支持多选 PDF，后端按扩展名检查并将每个文件复制到本次运行的临时工作区。同名文件使用独立 ID。移除导入项只删除临时副本；目前没有把导入项保存为 ACR 或持久化工作区的功能。
+`markdown/` 使用 `pulldown-cmark` 从 Markdown 文字中提取分级标题、标题原文范围、章节范围以及图片引用范围和所属标题路径。它定义结构锚点，不导入 Markdown 文件、不渲染 HTML，也不提供持久化。Markdown 导入尚未实现。范围为源文本中从 0 开始、左闭右开的 UTF-8 字节偏移。
 
-`PDF/` 提供分段文件读取和异步解析接口。Rust 调用方按 Source ID 读取文档页数，或按 Source ID 和从 1 开始的实际页序读取单页文本、可见边界、旋转角度和 PDF 用户单位。解析请求由应用界面中的 PDF.js 处理，可读取尚未浏览的页。扫描页没有文字层时返回空文本。接口可供未来的 Annotation、Explanation 使用；目前尚未接入 Agent 上下文或引用生成。
+Markdown 结构解析已实现，但 Markdown Source 文件导入尚未实现；TXT、EPUB、DOC/DOCX、PPT/PPTX 的导入和解析也未实现。这些是产品目标格式，当前只为 PDF 与 Markdown/TeX 编写了格式专属架构说明。按格式选成熟引擎，不自行重写通用文档解析器。共用接口可以描述格式能力，但定位结构按格式选择页码、章节、段落或合适的稳定锚点。
+
+Markdown 锚点字段见 [`markdown/README.md`](markdown/README.md)。

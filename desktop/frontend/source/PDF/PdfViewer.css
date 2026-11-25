@@ -1,0 +1,23 @@
+.pdf-reader { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.pdf-toolbar { display: flex; min-height: 42px; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 8px; border-bottom: 1px solid var(--line); background: var(--field); }
+.pdf-toolbar button { min-width: 34px; min-height: 32px; padding: 2px 7px; }
+.pdf-toolbar input { width: 52px; padding: 3px 5px; text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.pdf-toolbar-spacer { flex: 1; }
+.pdf-init-progress { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px; color: var(--muted); background: var(--field); border-bottom: 1px solid var(--line); font-size: 13px; }
+.pdf-init-progress button { flex: 0 0 auto; padding: 3px 9px; }
+.pdf-init-error { padding: 6px 12px; }
+.pdf-scroll { min-height: 0; flex: 1; overflow: auto; scrollbar-gutter: stable; overscroll-behavior: contain; background: var(--field); padding: 16px; }
+.pdfViewer { display: flex; flex-direction: column; align-items: center; gap: 16px; min-width: max-content; }
+.pdf-page { position: relative; flex: none; overflow: hidden; background: white; box-shadow: 0 2px 12px #0003; --scale-round-x: 1px; --scale-round-y: 1px; }
+.pdf-page canvas { display: block; }
+.textLayer { position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1; letter-spacing: normal; word-spacing: normal; text-align: initial; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; user-select: text; color-scheme: only light; --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.textLayer :is(span, br) { position: absolute; color: transparent; white-space: pre; transform-origin: 0% 0%; cursor: text; user-select: text; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) { z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height)); --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.textLayer .markedContent { display: contents; }
+.textLayer[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
+.textLayer[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
+.textLayer[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
+.textLayer ::selection { color: transparent; background: #5876d477; }
+.pdf-loading, .pdf-page-error { padding: 24px; color: var(--muted); text-align: center; }
+.pdf-page-error { position: absolute; inset: 0; color: var(--error); background: #fffdebd9; }
+.pdf-error { padding: 7px 12px; }

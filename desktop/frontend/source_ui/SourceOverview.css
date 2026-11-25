@@ -1,0 +1,34 @@
+.pdf-viewer-shell { display: flex; min-height: 0; flex: 1; }
+.source-overview { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+.source-overview-toolbar { display: flex; min-height: 42px; align-items: center; gap: 10px; padding: 4px 9px; border-bottom: 1px solid var(--line); background: var(--field); }
+.source-overview-toolbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-overview-content { min-height: 0; flex: 1; overflow: auto; padding: 26px clamp(20px, 5vw, 52px) 48px; line-height: 1.75; overflow-wrap: anywhere; }
+.source-overview-content > :first-child { margin-top: 0; }
+.source-overview-content > .markdown-renderer > :first-child { margin-top: 0; }
+.source-overview-content h1, .source-overview-content h2, .source-overview-content h3,
+.source-overview-content h4, .source-overview-content h5, .source-overview-content h6 { margin: 1.4em 0 .55em; line-height: 1.35; }
+.source-overview-content h1 { font-size: 1.8em; }
+.source-overview-content h2 { font-size: 1.5em; }
+.source-overview-content h3 { font-size: 1.25em; }
+.source-overview-content p, .source-overview-content ul, .source-overview-content ol,
+.source-overview-content blockquote, .source-overview-content pre { margin: .7em 0; }
+.source-overview-content li + li { margin-top: .25em; }
+.source-overview-content blockquote { padding: 1px 14px; border-left: 3px solid var(--mark); color: var(--muted); }
+.source-overview-content blockquote p { margin: .55em 0; }
+.source-overview-content code { padding: 1px 4px; border-radius: 4px; background: var(--field); font: .9em ui-monospace, monospace; }
+.source-overview-content pre { max-width: 100%; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.source-overview-content pre code { padding: 0; background: transparent; }
+.source-overview-content a { color: var(--selected-ink); text-underline-offset: 3px; }
+.source-overview-content table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.source-overview-content th, .source-overview-content td { padding: 6px 10px; border: 1px solid var(--line); }
+.source-overview-content th { background: var(--field); text-align: left; }
+.source-overview-content img { max-width: 100%; height: auto; }
+.source-overview-content input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: middle; }
+.source-overview-content hr { border: 0; border-top: 1px solid var(--line); }
+.source-overview-notes, .source-overview-citations { padding: 10px clamp(20px, 5vw, 52px); border-top: 1px solid var(--line); background: var(--field); }
+.source-overview-notes { color: var(--muted); font-size: 13px; }
+.source-overview-notes ul, .source-overview-citations ul { margin: 0; padding-left: 20px; }
+.source-overview-citations { max-height: 190px; overflow: auto; }
+.source-overview-citations h2 { margin: 0 0 6px; font-size: 15px; }
+.source-overview-citations a { color: var(--selected-ink); text-underline-offset: 3px; }
+.source-overview-error { padding: 6px 14px 0; }

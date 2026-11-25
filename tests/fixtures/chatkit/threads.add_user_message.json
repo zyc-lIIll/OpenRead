@@ -1,0 +1,14 @@
+{
+  "type": "threads.add_user_message",
+  "params": {
+    "thread_id": "thread_1029384756",
+    "input": {
+      "content": [{ "type": "input_text", "text": "Continue." }],
+      "attachments": [],
+      "inference_options": {
+        "model": "f3d27c59-1f17-4124-860a-0e1f706294a8",
+        "tool_choice": null
+      }
+    }
+  }
+}

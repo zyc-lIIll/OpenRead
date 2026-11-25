@@ -1,0 +1,6 @@
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"Hello"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed"}}
+

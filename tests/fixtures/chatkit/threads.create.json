@@ -1,0 +1,13 @@
+{
+  "type": "threads.create",
+  "params": {
+    "input": {
+      "content": [{ "type": "input_text", "text": "Summarize this topic." }],
+      "attachments": [],
+      "inference_options": {
+        "model": "f3d27c59-1f17-4124-860a-0e1f706294a8",
+        "tool_choice": null
+      }
+    }
+  }
+}

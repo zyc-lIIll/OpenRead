@@ -1,0 +1,8 @@
+data: {"type":"thread.item.updated","item_id":"message_fixture","update":{"type":"assistant_message.content_part.added","content_index":0,"content":{"type":"output_text","text":"","annotations":[]}}}
+
+data: {"type":"thread.item.updated","item_id":"message_fixture","update":{"type":"assistant_message.content_part.text_delta","content_index":0,"delta":"Hello"}}
+
+data: {"type":"thread.item.updated","item_id":"message_fixture","update":{"type":"assistant_message.content_part.done","content_index":0,"content":{"type":"output_text","text":"Hello","annotations":[]}}}
+
+data: {"type":"thread.item.done","item":{"type":"assistant_message","id":"message_fixture","thread_id":"thread_fixture","created_at":"2026-01-01T00:00:00Z","content":[{"type":"output_text","text":"Hello","annotations":[]}]}}
+

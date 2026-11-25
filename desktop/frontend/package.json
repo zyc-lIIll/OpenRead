@@ -1,0 +1,34 @@
+{
+  "name": "openread",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-pdf-assets.mjs",
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "prebuild": "node scripts/copy-pdf-assets.mjs",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "cd ../backend && tauri"
+  },
+  "dependencies": {
+    "@openai/chatkit-react": "^1.6.1",
+    "@tauri-apps/api": "^2.0.0",
+    "katex": "^0.16.47",
+    "pdfjs-dist": "6.5.438",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}
