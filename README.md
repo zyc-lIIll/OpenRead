@@ -6,6 +6,17 @@ OpenRead 是一款以文档为单位的 AI 辅助阅读器，最终目标是 Win
 
 当前阶段优先把 OpenAI API 和 ChatGPT 登录渠道的阅读体验做好。联网搜索已用于 Source 初始化，也可由 Explanation 在 ChatGPT 路由按需调用；API Key 路由目前没有通用搜索工具。图片搜索、本地 OCR，以及更多大型厂商和第三方服务商的适配留待后续阶段。PDF 扫描页可作为页面图像交给支持视觉输入的模型识读。
 
+## 项目文档索引
+
+本文件说明产品目标与当前实现；施工流程和代码放置规则见 [`AGENTS.md`](AGENTS.md)。各模块的职责、接口、限制和状态见下列 README：
+
+| 范围 | 模块文档 |
+| --- | --- |
+| ACR | [格式草案](ACR/README.md) · [后端读写](desktop/backend/acr/README.md) |
+| 后端 Agent | [Agent 总览](desktop/backend/agent/README.md) · [统一模型请求与响应](desktop/backend/agent/model/README.md) · [Source 初始化](desktop/backend/agent/initial/README.md) · [Explanation 工作流](desktop/backend/agent/explanation/README.md) · [Explanation skills](desktop/backend/agent/explanation/skill/README.md) · [通用阅读 skills](desktop/backend/agent/skill/README.md) · [工具调度](desktop/backend/agent/tool/README.md) · [Source 上下文读取](desktop/backend/agent/tool/source/README.md) · [Annotation Agent（未实现）](desktop/backend/agent/annotation/README.md) |
+| 后端服务 | [Source 导入与解析](desktop/backend/source/README.md) · [Markdown 结构锚点](desktop/backend/source/markdown/README.md) · [API 服务商](desktop/backend/providers/README.md) · [ChatGPT 授权](desktop/backend/ai-verification/README.md) |
+| 前端应用与阅读 | [应用框架](desktop/frontend/app_ui/README.md) · [共用 Chat UI](desktop/frontend/agent_ui/chat_ui/README.md) · [Explanation UI](desktop/frontend/agent_ui/explanation_ui/README.md) · [Annotation UI（未实现）](desktop/frontend/agent_ui/annotation_ui/README.md) · [Source 阅读 UI](desktop/frontend/source_ui/README.md) · [Source 格式 UI](desktop/frontend/source/README.md) · [PDF 阅读器](desktop/frontend/source/PDF/README.md) · [Markdown / TeX 阅读交互](desktop/frontend/source/markdown/README.md) |
+
 ## 当前实现状态
 
 | 功能 | 当前状态 |
@@ -15,9 +26,9 @@ OpenRead 是一款以文档为单位的 AI 辅助阅读器，最终目标是 Win
 | Markdown 结构 | 已能从 Markdown 文字解析分级标题、章节范围及图片的源文本锚点；Markdown 文件导入和专属阅读界面尚未实现。 |
 | 模型与账号 | 已实现 API 服务商配置、模型列表/路由，以及 ChatGPT 登录和额度授权流程；主对话可调用本机 Agent 工具。线程仅在应用运行时保留，不关联 ACR。真实账号授权和模型请求仍待 Windows 安装环境实测。 |
 | 思考强度 | ChatGPT 默认强度可在设置中选择，聊天框可单次调整；自动、低、中、高已接入 ChatGPT 请求。API Key 模型不提供此选项。真实模型是否接受所选值仍待实测。 |
-| Agent 功能 | 已实现 PDF Source 初始化、Markdown 概览查看、Explanation 五类工作流、Source 列表/概览/原文工具调用、长回答工具循环、ChatGPT 路由的按需联网搜索，以及可点击的 PDF 页引用。概览和对话只保存在当前运行内存；Annotation 工作流、会话持久化和 ACR 读写仍未实现。 |
+| Agent 功能 | 已实现 PDF Source 初始化、Markdown 概览查看、Explanation 五类工作流、Source 列表/概览/原文工具调用、长回答工具循环、ChatGPT 路由的按需联网搜索，以及可点击的 PDF 页引用。初始化和 Explanation 共用统一请求/响应路由；概览和对话只保存在当前运行内存。Annotation 工作流、会话持久化和 ACR 读写仍未实现。 |
 | 其他格式与 ACR | 目标格式还包括 Markdown、TXT、EPUB、DOC/DOCX、PPT/PPTX；当前应用仅支持 PDF。ACR 仍是格式设计，应用读写尚未实现。 |
-| Windows 安装包 | 此前已生成 0.1.0 x64 未签名 NSIS 本地验收包；本轮 Explanation 改动尚未重新打包或安装验证。正式版本仍计划经 GitHub Releases 分发。 |
+| Windows 安装包 | 此前已生成 0.1.0 x64 未签名 NSIS 本地验收包；本次 Agent 请求/响应统一改造尚未重新打包或安装验证。正式版本仍计划经 GitHub Releases 分发。 |
 
 下文标记为“产品目标”或“草案”的内容用于描述计划行为，不代表当前已经可用。
 
@@ -35,7 +46,7 @@ OpenRead 是一款以文档为单位的 AI 辅助阅读器，最终目标是 Win
 
 - 最多同时登录一个 ChatGPT 账号。设置的「账号」页显示当前账号、额度授权状态和模型来源开关：开关打开时只显示 ChatGPT 模型，关闭时只显示已配置的 API 服务商模型。开关不会退出账号；登录且额度授权成功后默认使用 ChatGPT，用户切换到 API 后会记住选择。未来增加其他登录来源时，同一时刻最多只能选择一个登录来源。
 - 未登录时，使用用户配置的服务商和模型。欢迎页选择「使用 API Key」可先进入阅读台，之后再配置服务商。
-- 模型选择器显示「服务商名称 + 模型」；选择结果决定实际请求路由。线程和 Source 概览只保存在运行期间，不写入 ACR。Explanation 可通过共享模型适配层使用 Chat Completions 或 Responses API；ChatGPT 路由支持按需联网搜索，API Key 路由不提供通用搜索。ChatGPT 思考强度可沿用聊天框设置，API Key 模型不显示此选项。附件和 Annotation 工作流尚未接入。
+- 模型选择器显示「服务商名称 + 模型」；选择结果决定实际请求路由。线程和 Source 概览只保存在运行期间，不写入 ACR。Explanation 与 Source 初始化共用模型适配层：ChatGPT 路由使用 Responses API，API 服务商由通用适配器使用 Chat Completions。ChatGPT 路由支持按需联网搜索，API Key 路由不提供通用搜索。ChatGPT 思考强度可沿用聊天框设置，API Key 模型不显示此选项。附件和 Annotation 工作流尚未接入。
 - 服务商配置保存在本机 JSON 中，包含名称、Base URL、API Key 和模型。界面用星号遮住 API Key；遮罩只影响显示，不加密 JSON 文件。密钥不得写入 ACR、日志、样例或 Git。
 
 ## 批注与 PDF 选区：产品目标
@@ -74,6 +85,30 @@ Source 工具位于 `desktop/backend/agent/tool/`：可列出当前已导入 PDF
 
 导入 PDF 后会询问是否对本次导入的全部文件执行初始化，确认后逐份处理；选择“否”不影响 Agent 后续读取原文。概览和聊天仍仅存在当前应用运行内存中。当前不包括 Annotation 工作流、跨会话持久化或完整 Explanation 文档版本管理。
 
+## Agent 统一请求与响应框架（已实现）
+
+不同模型服务商对消息、图片、工具调用、续传、流式事件和错误的协议各不相同。如果工作流分别组装服务商请求、读取 SSE 并解析响应，初始化和主对话会重复协议逻辑，工具循环、截断和错误处理也容易分叉。当前把这些差异集中在 `desktop/backend/agent/model/`：
+
+1. `initial/` 和 `explanation/` 只构造统一请求：顶层 `instructions`、有序 `input`、工具清单 `tools` 及通用控制选项。
+2. `model/mod.rs` 在任务开始时解析并持有所选路由，中心入口选择适配器、发送请求、读取响应流；每次实际请求仍重新检查凭据或服务商配置。
+3. `chatgpt.rs` 负责 ChatGPT Responses 请求和响应；`other.rs` 负责通用 API 的 Chat Completions 请求和响应。适配器把文本增量、工具调用、引用、完成、截断和错误归一后交回 Agent。
+4. Agent 根据统一结果返回文本，或把本机函数交给 `tool::dispatch` 执行，再将 `function_call_output` 加回下一轮 `input`。Responses 专属续传项目只由模型层保存为不透明上下文。
+
+`web_search` 表示搜索意图：ChatGPT 适配器可使用内建搜索；通用 API 没有搜索实现时会明确告诉模型当前不可搜索，不生成伪造的搜索结果。新增服务商协议时在模型层增加适配器，不让工作流拼接服务商 JSON 或解析服务商 SSE。请求格式、事件和续传约定见[模型模块 README](desktop/backend/agent/model/README.md)。
+
+```mermaid
+flowchart LR
+    A[Source 初始化 / Explanation] --> B[统一 Request]
+    B --> C[model/mod.rs 中心路由]
+    C --> D[chatgpt.rs / other.rs]
+    D --> E[服务商 API]
+    E --> F[归一化 Turn 与事件]
+    F --> A
+    A -->|本机函数调用| G[tool::dispatch]
+    G --> H[统一函数结果加入 input]
+    H --> B
+```
+
 ## 其他产品逻辑目标（待实现与细化）
 
 以下仍是目标产品流程，不代表当前已实现：
@@ -91,7 +126,7 @@ Source 工具位于 `desktop/backend/agent/tool/`：可列出当前已导入 PDF
 
 ## 技术与目录
 
-前端使用 TypeScript、React、CSS 和 Vite；本地后端使用 Rust 和 Tauri。Source 分三处：`backend/source` 导入和解析文档并确定稳定锚点；`frontend/source` 按格式呈现原文并处理选区/框选交互；`backend/agent/tool/source` 按格式读取和切分 Agent 上下文，不实现底层解析。通用工具和概览读取放在 `backend/agent/tool/`。按格式选择成熟引擎；同一引擎能同时提供预览和文本时，优先复用已打开的文档。PDF 使用页码及页内矩形，Markdown 使用标题层级和源文本范围。
+前端使用 TypeScript、React、CSS 和 Vite；本地后端使用 Rust 和 Tauri。Source 分三处：`backend/source` 导入和解析文档并确定稳定锚点；`frontend/source` 按格式呈现原文并处理选区/框选交互；`backend/agent/tool/source` 按格式读取和切分 Agent 上下文，不实现底层解析。通用工具和概览读取放在 `backend/agent/tool/`。按格式选择成熟引擎；同一引擎能同时提供预览和文本时，优先复用已打开的文档。PDF 使用页码及归一化页内矩形，Markdown 使用标题层级和 UTF-8 源文本范围。
 
 ```text
 desktop/
@@ -107,7 +142,7 @@ desktop/
       chat_ui/                共用聊天渲染、输入和模型选择
   backend/
     agent/                    ChatKit 本机服务与 Agent 入口
-      model/                  Chat Completions/Responses 请求和流事件适配
+      model/                  统一请求/响应中心路由及 ChatGPT/API 协议适配器
       tool/                   共用 Agent 工具、概览与按格式原文上下文
       explanation/            主对话工作流、system prompt、引用校验与类别 skills
       skill/                  多学科通用阅读 skills
@@ -136,6 +171,8 @@ tests/                        应用测试和专用夹具
 
 本地验收安装包只用于验证当前工作区，不代表已发布版本；测试生成物放在系统临时目录，不纳入源码或 ACR。
 
+Windows 正式打包前，需通过 `VITE_CHATKIT_DOMAIN_KEY` 配置获发的 ChatKit domain key，并在 ChatKit 登记打包应用的 Tauri 页面 origin。开发用 `local-dev` key 不能证明打包 origin 已正确登记；细节见 [Chat UI README](desktop/frontend/agent_ui/chat_ui/README.md)。
+
 ## Windows 首版本地构建
 
 在具备 Node.js、Rust MSVC 工具链和 Tauri Windows 构建依赖的 Windows x64 环境下，通过 PowerShell 运行：
@@ -143,6 +180,7 @@ tests/                        应用测试和专用夹具
 ```powershell
 cd desktop/frontend
 npm ci
+$env:CARGO_TARGET_DIR = Join-Path $env:TEMP "openread-target"
 npm run tauri -- dev
 ```
 
