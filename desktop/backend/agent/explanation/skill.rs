@@ -1,15 +1,9 @@
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Selection {
-    workflow: String,
-    reading_lens: String,
-    title: String,
+pub struct Selection {
+    pub workflow: String,
+    pub reading_lens: String,
 }
 
-pub fn select(arguments: &str) -> Result<(String, String, String), String> {
-    let selection: Selection =
-        serde_json::from_str(arguments).map_err(|_| "工作流选择参数无效。".to_string())?;
+pub fn select(selection: Selection) -> Result<String, String> {
     let workflow = match selection.workflow.as_str() {
         "source_explanation" => include_str!("skill/source_explanation.md"),
         "knowledge_question" => include_str!("skill/knowledge_question.md"),
@@ -26,22 +20,5 @@ pub fn select(arguments: &str) -> Result<(String, String, String), String> {
         "humanities" => include_str!("../skill/humanities.md"),
         _ => return Err("学科视角无效。".into()),
     };
-    let title = selection
-        .title
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(32)
-        .collect::<String>();
-    let title = if title.is_empty() {
-        "新对话".into()
-    } else {
-        title
-    };
-    Ok((
-        selection.workflow,
-        title,
-        format!("{}\n\n{}", workflow.trim(), lens.trim()),
-    ))
+    Ok(format!("{}\n\n{}", workflow.trim(), lens.trim()))
 }

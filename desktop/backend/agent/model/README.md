@@ -1,6 +1,6 @@
 # Agent 模型请求格式与适配器路由
 
-本文定义 OpenRead Agent 的统一请求格式、服务商适配器职责和请求/响应流程。下面“目标约定”描述后续统一后的行为；“当前实现”说明代码尚未完成的部分。
+本文定义 OpenRead Agent 的统一请求格式、服务商适配器职责和请求/响应流程。统一请求与首阶段适配器已经实现；各 Agent 自己管理阶段和用户可见流向，供应商适配器不解释业务阶段。
 
 ## 目标统一请求格式
 
@@ -88,6 +88,15 @@ Responses 需要续传的原始推理/输出项目由模型层保存为不透明
 
 适配器负责处理服务商特有的 namespace、响应帧、工具生命周期、引用格式和续传项；Agent 工作流不拼这些 wire JSON。服务商若已在同一请求中执行内建工具并返回最终文本，适配器将进度/引用和最终响应归一化后送回 Agent；若响应要求 Agent 再发一轮，则把规范化工具结果加回 `input` 后继续循环。
 
+## Agent 阶段与流式事件
+
+- `StreamEvent::Text` 表示一段文本增量。分块边界由服务商决定，单个增量可能只是 JSON 字符串或普通文本的一部分，不代表完整对象、字段或阶段标记。适配器只解析协议帧，不根据正文猜测内容用途。
+- 完整的函数调用在响应终止后归入 `Turn.tool_calls`。调用参数必须完整并由该 Agent 本轮选出的注册工具或控制函数校验；业务阶段只由 Agent 自己决定。
+- `model/mod.rs` 接收 Agent 当前请求选择的工具清单和 `tool_choice`。流式正文由 Agent loop 按发起请求前确定的显示去向路由到临时播报或正式回复。服务商适配器不推断或修改阶段。
+- `SearchProgress`、最终文本、函数调用、引用、截断和错误仍按统一事件/结果返回。服务商专属续传数据仍由模型层放入不透明 `Context`，Agent 只原样传回。
+
+Explanation 的双阶段循环见 [Explanation README](../explanation/README.md)。对话显示事件和共用引用解析见 [Agent README](../README.md) 及 `../citation.rs`；它们不包含 Agent loop。
+
 ## 目录和路由约定
 
 - `model/mod.rs` 是唯一中心路由程序：根据已选模型路由确定适配器，取得现有凭据来源，调用适配器构造请求、发送并读取流，再把结果交回 Agent。
@@ -129,5 +138,5 @@ flowchart TD
 ## 当前实现状态
 
 - `model/mod.rs` 是中心入口，在 Agent 任务开始时解析并持有当前路由快照，将 ChatGPT 登录路由交给 `chatgpt.rs`、API Key 路由交给 `other.rs`；每次请求仍由适配器检查当前凭据和配置，不需要改服务商配置格式。
-- `initial/` 与 `explanation/` 都传递统一 `Request` 并消费归一化 `Turn`。`input` 支持有序文字/图片内容、函数调用和函数结果；本机函数仍交由 `tool::dispatch` 执行。ChatGPT 搜索进度、URL 引用、截断和错误由适配器归一，通用 API 在没有搜索实现时明确告知模型不可搜索。
+- `initial/` 与 Explanation 自有 loop 都传递统一 `Request` 并消费归一化 `Turn`。`input` 支持有序文字/图片内容、函数调用和函数结果；本机函数由 Agent 本轮选择的注册工具验证后交给 `tool::dispatch`。ChatGPT 搜索进度、URL 引用、截断和错误由适配器归一，通用 API 在没有搜索实现时明确告知模型不可搜索。
 - Responses 原始 output items 只保存在模型层 `Context` 中，Agent 只传递该不透明值；供应商请求体和 SSE 解码不再出现在工作流目录。

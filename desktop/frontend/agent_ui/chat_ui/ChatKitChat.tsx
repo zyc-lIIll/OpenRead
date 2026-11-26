@@ -7,6 +7,12 @@ import "./chatkit.css";
 export type ChatKitConnection = { url: string; token: string };
 const chatKitDomainKey = import.meta.env.VITE_CHATKIT_DOMAIN_KEY?.trim() || "local-dev";
 
+type ChatKitActions = {
+  setThreadId(threadId: string | null): Promise<void>;
+  setComposerValue(value: { text?: string }): Promise<void>;
+  sendCustomAction(action: { type: string; payload?: Record<string, unknown> }): Promise<void>;
+};
+
 let chatKitScript: Promise<void> | undefined;
 
 function loadChatKitScript() {
@@ -67,6 +73,9 @@ function ChatKitSession({ connection, models, defaultPreferenceKey, modelSource,
   theme: Theme;
   onCitationClick: (entity: Entity) => void;
 }) {
+  const [activity, setActivity] = useState<{ replyId: string; segmentId: number; text: string; status: string } | null>(null);
+  const [offer, setOffer] = useState<{ replyId: string; offerId: string } | null>(null);
+  const controlRef = useRef<ChatKitActions | null>(null);
   const reasoningEffortRef = useRef(reasoningEffort);
   reasoningEffortRef.current = reasoningEffort;
   const fetchWithToken = useCallback<typeof fetch>((input, init = {}) => {
@@ -80,6 +89,61 @@ function ChatKitSession({ connection, models, defaultPreferenceKey, modelSource,
   const scheme = theme === "system"
     ? window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
     : theme;
+  const onEffect = useCallback(({ name, data }: { name: string; data?: Record<string, unknown> }) => {
+    if (name === "openread.agent.activity") {
+      const replyId = typeof data?.reply_id === "string" ? data.reply_id : "";
+      const segmentId = typeof data?.segment_id === "number" ? data.segment_id : 0;
+      const kind = typeof data?.kind === "string" ? data.kind : "";
+      const text = typeof data?.text === "string" ? data.text : "";
+      setOffer((current) => current?.replyId === replyId ? current : null);
+      if (kind === "clear") {
+        setActivity((current) => current?.replyId === replyId && current.segmentId === segmentId ? null : current);
+      } else if (kind === "text") {
+        setActivity((current) => {
+          const prior = current?.replyId === replyId && current.segmentId === segmentId ? current : null;
+          return { replyId, segmentId, text: `${prior?.text ?? ""}${text}`.slice(-2400), status: prior?.status ?? "正在整理资料…" };
+        });
+      } else {
+        const status = kind === "search" ? "正在联网搜索…"
+          : kind === "tool_start" ? "正在调用资料工具…"
+            : kind === "tool_done" ? "资料工具已返回。" : "正在处理…";
+        setActivity((current) => ({
+          replyId,
+          segmentId,
+          text: current?.replyId === replyId && current.segmentId === segmentId ? current.text : "",
+          status,
+        }));
+      }
+      return;
+    }
+    if (name === "openread.explanation.offer") {
+      const replyId = typeof data?.reply_id === "string" ? data.reply_id : "";
+      const offerId = typeof data?.offer_id === "string" ? data.offer_id : "";
+      if (replyId && offerId) setOffer({ replyId, offerId });
+      return;
+    }
+    if (name === "openread.explanation.draft") {
+      const text = typeof data?.text === "string" ? data.text : "";
+      void (async () => {
+        await controlRef.current?.setThreadId(null);
+        await controlRef.current?.setComposerValue({ text });
+        setActivity(null);
+        setOffer(null);
+      })();
+      return;
+    }
+    if (name === "openread.explanation.dismissed") setOffer(null);
+  }, []);
+  const onResponseStart = useCallback(() => {
+    setActivity(null);
+    setOffer(null);
+  }, []);
+  const onResponseEnd = useCallback(() => setActivity(null), []);
+  const onError = useCallback(() => setActivity(null), []);
+  const onThreadChange = useCallback(() => {
+    setActivity(null);
+    setOffer(null);
+  }, []);
   const options = useMemo<UseChatKitOptions>(() => ({
     api: { url: connection.url, domainKey: chatKitDomainKey, fetch: fetchWithToken },
     locale: "zh-CN",
@@ -101,7 +165,37 @@ function ChatKitSession({ connection, models, defaultPreferenceKey, modelSource,
     },
     entities: { onClick: onCitationClick },
     thread: { autoScroll: true },
-  }), [connection.url, defaultPreferenceKey, fetchWithToken, models, onCitationClick, scheme]);
-  const { control } = useChatKit(options);
-  return <ChatKit control={control} className="chatkit-widget" aria-label="Explanation 对话" />;
+    onResponseStart,
+    onResponseEnd,
+    onError,
+    onThreadChange,
+    onEffect,
+  }), [connection.url, defaultPreferenceKey, fetchWithToken, models, onCitationClick, onEffect, onError, onResponseEnd, onResponseStart, onThreadChange, scheme]);
+  const { control, setThreadId, setComposerValue, sendCustomAction } = useChatKit(options);
+  controlRef.current = { setThreadId, setComposerValue, sendCustomAction };
+  const resolveOffer = async (accepted: boolean) => {
+    if (!offer) return;
+    try {
+      await sendCustomAction({
+        type: "open_explanation",
+        payload: { offer_id: offer.offerId, accepted },
+      });
+      if (!accepted) setOffer(null);
+    } catch {
+      setOffer(null);
+    }
+  };
+
+  return <div className="chatkit-session">
+    <ChatKit control={control} className="chatkit-widget" aria-label="Explanation 对话" />
+    {offer && <div className="chatkit-banner" role="group" aria-label="新建 Explanation 对话">
+      <span>要把这条问题放到新的 Explanation 对话吗？</span>
+      <button onClick={() => void resolveOffer(true)}>新开对话</button>
+      <button onClick={() => void resolveOffer(false)}>暂不</button>
+    </div>}
+    {!offer && activity && <div className="chatkit-activity" role="status" aria-live="polite">
+      <span>{activity.status}</span>
+      {activity.text && <p>{activity.text}</p>}
+    </div>}
+  </div>;
 }

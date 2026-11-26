@@ -231,22 +231,30 @@ pub(super) fn decode(value: &Value, event_name: Option<&str>) -> Result<Vec<supe
     })
 }
 
-pub(super) fn tool_calls(output: &[Value]) -> Vec<super::ModelToolCall> {
+pub(super) fn tool_calls(output: &[Value]) -> Result<Vec<super::ModelToolCall>, String> {
     output
         .iter()
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-        .filter_map(|item| {
-            Some(super::ModelToolCall {
-                id: item.get("call_id")?.as_str()?.to_owned(),
+        .map(|item| {
+            let id = item
+                .get("call_id")
+                .and_then(Value::as_str)
+                .ok_or("ChatGPT 函数调用缺少调用 ID。")?;
+            let name = item
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("ChatGPT 函数调用缺少名称。")?;
+            let arguments = item
+                .get("arguments")
+                .and_then(Value::as_str)
+                .ok_or("ChatGPT 函数调用缺少完整参数。")?;
+            Ok(super::ModelToolCall {
+                id: id.to_owned(),
                 name: match item.get("namespace").and_then(Value::as_str) {
-                    Some("openread") | None => item.get("name")?.as_str()?.to_owned(),
-                    Some(namespace) => format!("{namespace}.{}", item.get("name")?.as_str()?),
+                    Some("openread") | None => name.to_owned(),
+                    Some(namespace) => format!("{namespace}.{name}"),
                 },
-                arguments: item
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .unwrap_or("{}")
-                    .to_owned(),
+                arguments: arguments.to_owned(),
             })
         })
         .collect()

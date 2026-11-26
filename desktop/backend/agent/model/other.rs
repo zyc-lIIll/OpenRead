@@ -163,7 +163,7 @@ fn read_function_calls(input: &[Value], index: &mut usize) -> Result<Vec<Value>,
             "type":"function",
             "function":{
                 "name":item.get("name").and_then(Value::as_str).ok_or("函数调用缺少名称。")?,
-                "arguments":item.get("arguments").and_then(Value::as_str).unwrap_or("{}")
+                    "arguments":item.get("arguments").and_then(Value::as_str).ok_or("函数调用缺少参数。")?
             }
         }));
         *index += 1;

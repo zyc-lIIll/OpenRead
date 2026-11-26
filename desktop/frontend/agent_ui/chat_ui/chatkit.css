@@ -1,3 +1,4 @@
+.chatkit-session { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
 .chatkit-widget { display: block; width: 100%; height: 100%; min-height: 0; flex: 1; }
 .chatkit-state { display: grid; min-height: 0; flex: 1; align-content: center; justify-items: center; gap: 12px; padding: 24px; color: var(--muted); text-align: center; }
 .chatkit-state button { min-width: 92px; min-height: 44px; }
@@ -6,3 +7,5 @@
 .chat-effort-control select { min-height: 30px; padding: 3px 8px; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 7px; }
 .chatkit-banner { position: absolute; z-index: 2; right: 12px; bottom: 12px; left: 12px; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 12px; color: var(--text); text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 12px #0002; }
 .chatkit-banner button { min-height: 36px; flex: none; }
+.chatkit-activity { position: absolute; z-index: 2; right: 12px; bottom: 12px; left: 12px; display: grid; gap: 6px; max-height: 30%; overflow: auto; padding: 10px 12px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 12px #0002; }
+.chatkit-activity p { margin: 0; max-height: 5.5em; overflow: auto; white-space: pre-wrap; }

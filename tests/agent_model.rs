@@ -65,7 +65,7 @@ fn chatgpt_normalizes_tool_calls_citations_and_opaque_context() {
     ]});
     let output = response["output"].as_array().unwrap();
     assert_eq!(
-        chatgpt::tool_calls(output),
+        chatgpt::tool_calls(output).unwrap(),
         vec![ModelToolCall {
             id: "call_1".into(),
             name: "read_source".into(),
@@ -80,6 +80,16 @@ fn chatgpt_normalizes_tool_calls_citations_and_opaque_context() {
             index: 9
         }]
     );
+}
+
+#[test]
+fn chatgpt_rejects_function_calls_without_complete_arguments() {
+    let output = json!([{
+        "type":"function_call",
+        "call_id":"call_1",
+        "name":"organize_output"
+    }]);
+    assert!(chatgpt::tool_calls(output.as_array().unwrap()).is_err());
 }
 
 #[test]
@@ -217,7 +227,7 @@ fn image_error_detection_does_not_treat_missing_models_as_vision_failures() {
 
 #[test]
 fn shared_tool_schemas_use_provider_neutral_function_definitions() {
-    let tools = crate::agent::tool::schemas();
+    let tools = crate::agent::tool::shared_registry().schemas();
     assert_eq!(tools.len(), 3);
     assert!(tools.iter().all(|tool| tool["type"] == "function"));
     let request = Request::new(

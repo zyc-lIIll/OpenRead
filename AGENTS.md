@@ -19,16 +19,27 @@ OpenRead 是面向多学科阅读任务的 Windows 桌面 AI 阅读器。产品�
 
 - 已有 Windows/Tauri 桌面框架、欢迎页与设置、PDF 导入/阅读/按页解析、Markdown 标题/章节/图片锚点解析、KaTeX 概览渲染、ChatKit，以及 ChatGPT 登录/额度授权和 API 服务商配置与模型路由。
 - 已实现首版 PDF Source 初始化：结合 PDF 文本与页面图像，分段更新 Markdown 概览；ChatGPT 路由可按需联网搜索。概览保存在前端阅读器和后端 Workspace 内存，供 Explanation 工具按需读取；不持久化。
-- 主对话 Explanation Agent 已实现五类工作流选择、学科阅读 skills、共享 Source 工具、模型响应统一适配、长回答工具循环、ChatGPT 路由的联网搜索以及可点击的 PDF 页引用。Annotation 问答/自动便签、Explanation 文档版本和会话持久化尚未实现。ChatGPT 思考强度可在设置中选择并由聊天框覆盖；API Key 路由不显示该选项。
+- 主对话 Explanation Agent 已实现五类工作流选择、学科阅读 skills、注册工具、自有双阶段 Agent loop、ChatGPT 路由的联网搜索以及可点击的 PDF 页引用。取材与正式输出可在同一回复中多次切换。Annotation 问答/自动便签、Explanation 文档版本和会话持久化尚未实现。ChatGPT 思考强度可在设置中选择并由聊天框覆盖；API Key 路由不显示该选项。
 - 当前仅支持 PDF 导入和原文阅读。Markdown 结构锚点解析已实现，但 Markdown 文件导入/阅读尚未实现；其他文件格式、ACR 应用读写和本地 OCR 尚未实现。扫描 PDF 可把页面图像交给支持视觉输入的模型。通用联网搜索仅由 ChatGPT Responses 路由提供，API Key 路由无搜索。除非任务明确要求，不要把这些功能顺手加入当前范围。
 
 根 README 中标为“目标”或“草案”的内容不是已实现功能。修改文档时明确区分现状、产品约定和待讨论事项。
+
+## Agent loop、显示事件与共用引用
+
+- 每个对话 Agent 在自己的目录实现循环，负责自己的 system instructions、工具集、上下文策略、首轮规则、阶段切换、重试和循环结束处理。当前只有 Explanation loop 已实现；`select_workflow`、`organize_output`、`continue_output` 和 `continue_collection` 都是 Explanation 专用约定，未来 Annotation 不被要求采用。Explanation 阶段 2 中，`continue_output` 留在当前片段续写，`continue_collection` 完成当前片段后回到阶段 1。
+- `agent/mod.rs` 的 `CompletionEvent` 是对话 Agent 共用的显示接口。取材过程文字、搜索进度和真实工具状态用 `Activity` 临时显示；正式正文用 `Delta` 写入同一条助手消息；片段引用、片段完成、用户操作、完成和错误也通过该接口交给 ChatKit。各 Agent 决定何时发出事件，ChatKit/UI 负责按统一显示方针呈现。
+- `agent/citation.rs` 是共用引用解析器：流式处理 `[[cite:rN]]` / `[[cite:wN]]`、缓冲跨 chunk 标记、校验引用目标并计算正文位置。不同 Agent 可复用；它不管理 Agent 循环或阶段。
+- 工具注册项绑定模型 schema 与处理函数。每个 Agent 从自己的循环选择本轮工具；同一组已注册工具生成请求 schema 并限制后端 dispatch。参数、Source ID、页范围和输出长度仍由后端校验。用户确认操作单独走 ChatKit action，不作为模型函数暴露。
+- Explanation 首版采用 `KeepAll`，跨取材/正式输出及多个片段保留完整 input 和模型层不透明 Context。后端在请求发出前确定当前响应的显示去向；只有完整、校验通过的函数调用才能改变下一轮阶段。取消或错误会清除临时播报，保留已完成正文与引用。
+- `initial/` 是独立的 Source 概览流水线，继续使用自己的进度与结果接口，不纳入对话 Agent 显示事件。`open_explanation` 仍由用户确认操作调用；后端验证一次性建议绑定到当前对话最新用户消息，确认后只预填原文，发送后才创建新线程。
+
+各 Agent 的循环与显示契约见[Agent 总览](desktop/backend/agent/README.md)和[Explanation README](desktop/backend/agent/explanation/README.md)；供应商协议见[模型模块 README](desktop/backend/agent/model/README.md)。
 
 ## Agent 统一请求与响应框架
 
 不同服务商的消息、图片、工具、流式响应、续传和错误协议不同。工作流不得分别拼接服务商请求 JSON、读取服务商 SSE 或解析服务商响应；统一边界如下：
 
-- `initial/`、`explanation/` 及未来的 `annotation/` 只构造 OpenRead 请求：所选模型路由、顶层 `instructions`、有序 `input`、`tools`、`tool_choice`、`stream`、`store` 和适用的思考强度。
+- `initial/` 和各交互式 Agent 只构造 OpenRead 请求：所选模型路由、顶层 `instructions`、有序 `input`、本轮 `tools`、`tool_choice`、`stream`、`store` 和适用的思考强度。交互式 Agent 自己决定循环与阶段流向；模型适配器不推断业务阶段。
 - `model/mod.rs` 是唯一中心入口，按路由选择适配器并将响应流归一后交回工作流。每个任务开始时解析并持有路由快照，避免模型列表刷新中断长任务；每次实际请求仍须由适配器重新检查当下的授权或服务商配置。
 - `model/` 内每个已支持的服务商协议使用独立适配器文件；适配器同时转换请求和解析响应。当前 ChatGPT 登录使用 Responses，API Key 配置使用通用 Chat Completions。不得按可编辑的服务商显示名称猜协议，不创建空占位适配器；只有稳定路由信息不足时才扩展路由标识，并兼容旧配置。
 - 适配器归一化文本增量、函数调用、搜索进度与引用、完成、截断、错误及适用的图像拒绝状态。Agent 根据统一结果显示文本，或把本机函数交给 `tool::dispatch` 执行，再将函数结果加入下一轮 `input`；也可结束或返回错误。
@@ -52,7 +63,7 @@ OpenRead 是面向多学科阅读任务的 Windows 桌面 AI 阅读器。产品�
 ## 代码放置
 
 - `desktop/frontend` 使用 TypeScript、React、CSS 和 Vite。应用框架、欢迎页和设置放 `app_ui`；格式化阅读器和交互放 `source/PDF`、`source/markdown` 等格式目录；通用原文阅读 UI 放 `source_ui`；讲解入口、批注浮窗和共用聊天组件分别放 `agent_ui/explanation_ui`、`agent_ui/annotation_ui`、`agent_ui/chat_ui`。
-- `desktop/backend` 是 Rust/Tauri 本地后端。文档导入、解析和稳定锚点归 `source`；供应商请求/响应格式对接归 `agent/model`；共用工具归 `agent/tool`，按格式获取 Agent 上下文归 `agent/tool/source`；讲解和批注工作流分别归 `agent/explanation`、`agent/annotation`；学科共用 skills 归 `agent/skill`，Explanation 工作流 skills 归 `agent/explanation/skill`；批注锚点和关系归 `annotation`；ChatGPT 授权归 `ai-verification`；服务商配置归 `providers`；ACR 读写归 `acr`。
+- `desktop/backend` 是 Rust/Tauri 本地后端。文档导入、解析和稳定锚点归 `source`；供应商请求/响应格式对接归 `agent/model`；Agent loop 分别归各自的 `agent/explanation`、`agent/annotation`；共用显示事件由 `agent/mod.rs` 定义，共用引用流解析归 `agent/citation.rs`；工具注册与共用 Source 工具归 `agent/tool`，按格式获取 Agent 上下文归 `agent/tool/source`；学科共用 skills 归 `agent/skill`，Explanation 工作流 skills 归 `agent/explanation/skill`；批注锚点和关系归 `annotation`；ChatGPT 授权归 `ai-verification`；服务商配置归 `providers`；ACR 读写归 `acr`。
 - 后端管理导入原件和文档数据，前端负责呈现与阅读交互。按格式选成熟引擎；同一引擎能提供预览和文本时优先复用已打开的文档。共用接口描述格式能力，定位结构按格式选择页码、章节或段落锚点。
 - ACR 公约和兼容性样例放顶层 `ACR/`；应用测试和专用夹具放顶层 `tests/`；运行生成物放系统临时目录。
 

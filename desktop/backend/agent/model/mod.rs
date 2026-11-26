@@ -132,7 +132,7 @@ pub(crate) fn resolve(state: &AgentState, route_id: &str) -> Result<Route, Strin
 }
 
 #[cfg(test)]
-fn test_route() -> Route {
+pub(crate) fn test_route() -> Route {
     Route(ModelRoute::Api {
         provider_id: "provider".into(),
         model_id: "model".into(),
@@ -328,12 +328,14 @@ where
                     }
                     Event::Truncated(output) => {
                         turn.truncated = true;
-                        collect_response_output(adapter, output, request, &mut turn);
+                        collect_response_output(adapter, output, request, &mut turn)
+                            .map_err(Error::Failed)?;
                         completed = true;
                         break;
                     }
                     Event::Completed(output) => {
-                        collect_response_output(adapter, output, request, &mut turn);
+                        collect_response_output(adapter, output, request, &mut turn)
+                            .map_err(Error::Failed)?;
                         completed = true;
                         break;
                     }
@@ -370,7 +372,7 @@ where
     if turn
         .tool_calls
         .iter()
-        .any(|call| call.id.is_empty() || call.name.is_empty())
+        .any(|call| call.id.is_empty() || call.name.is_empty() || call.arguments.is_empty())
     {
         return Err(Error::Failed("模型返回的工具调用不完整。".into()));
     }
@@ -382,18 +384,19 @@ fn collect_response_output(
     output: Option<Value>,
     request: &Request,
     turn: &mut Turn,
-) {
+) -> Result<(), String> {
     let Some(items) = output.and_then(|output| output.as_array().cloned()) else {
-        return;
+        return Ok(());
     };
     if adapter == Adapter::Chatgpt {
-        turn.tool_calls.extend(chatgpt::tool_calls(&items));
+        turn.tool_calls.extend(chatgpt::tool_calls(&items)?);
         turn.citations.extend(chatgpt::citations(&items));
         turn.context.0.push(ResponseContext {
             input_index: request.input.len(),
             output: items,
         });
     }
+    Ok(())
 }
 
 fn has_image_input(input: &[Value]) -> bool {

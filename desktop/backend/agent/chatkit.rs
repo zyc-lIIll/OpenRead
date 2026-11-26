@@ -13,14 +13,18 @@ use axum::{
     routing::any,
     Router,
 };
-use chrono::Utc;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use futures_util::stream;
 use serde_json::{json, Value};
 use tauri::AppHandle;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use super::{AgentState, CompletionEvent, ReasoningEffort};
+use super::explanation::tools::OPEN_EXPLANATION_ACTION;
+use super::{
+    citation::{Citation, CitationTarget},
+    AgentState, CompletionEvent, ReasoningEffort,
+};
 
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 
@@ -37,6 +41,16 @@ struct ThreadRecord {
     created_at: String,
     title: Option<String>,
     items: Vec<Value>,
+    latest_user_message_id: Option<String>,
+    latest_user_text: Option<String>,
+    pending_action: Option<PendingAction>,
+}
+
+#[derive(Clone)]
+struct PendingAction {
+    id: String,
+    user_message_id: String,
+    issued_at: DateTime<Utc>,
 }
 
 pub(super) fn start(listener: StdTcpListener, app: AppHandle, agent: AgentState) {
@@ -173,11 +187,15 @@ async fn handle_request(
                 let id = format!("thread_{}", Uuid::new_v4().simple());
                 let created_at = Utc::now().to_rfc3339();
                 let user_item = user_message(&id, &text, route_id);
+                let user_message_id = user_item["id"].as_str().unwrap_or_default().to_string();
                 let mut record = ThreadRecord {
                     id: id.clone(),
                     created_at,
-                    title: None,
+                    title: Some(thread_title(&text)),
                     items: Vec::new(),
+                    latest_user_message_id: Some(user_message_id),
+                    latest_user_text: Some(text.clone()),
+                    pending_action: None,
                 };
                 record.items.push(user_item.clone());
                 let history = model_history(&record.items);
@@ -209,6 +227,12 @@ async fn handle_request(
                         origin,
                     );
                 };
+                if record.title.is_none() {
+                    record.title = Some(thread_title(&text));
+                }
+                record.latest_user_message_id = user_item["id"].as_str().map(str::to_string);
+                record.latest_user_text = Some(text.clone());
+                record.pending_action = None;
                 record.items.push(user_item.clone());
                 (
                     thread_id.to_string(),
@@ -255,6 +279,7 @@ async fn handle_request(
                 ),
             }
         }
+        "threads.custom_action" => handle_custom_action(state, &request, origin),
         "items.list" => {
             let Some(id) = request.pointer("/params/thread_id").and_then(Value::as_str) else {
                 return response(
@@ -305,6 +330,62 @@ async fn handle_request(
     }
 }
 
+fn handle_custom_action(state: ServerState, request: &Value, origin: &str) -> Response {
+    let params = &request["params"];
+    let Some(thread_id) = params.get("thread_id").and_then(Value::as_str) else {
+        return chatkit_error(StatusCode::BAD_REQUEST, "找不到当前对话。", origin);
+    };
+    let action = &params["action"];
+    if action.get("type").and_then(Value::as_str) != Some(OPEN_EXPLANATION_ACTION) {
+        return chatkit_error(StatusCode::BAD_REQUEST, "此对话操作无效。", origin);
+    }
+    let Some(offer_id) = action.pointer("/payload/offer_id").and_then(Value::as_str) else {
+        return chatkit_error(StatusCode::BAD_REQUEST, "新对话建议已失效。", origin);
+    };
+    let Some(accepted) = action.pointer("/payload/accepted").and_then(Value::as_bool) else {
+        return chatkit_error(StatusCode::BAD_REQUEST, "新对话操作无效。", origin);
+    };
+
+    let text = {
+        let Ok(mut threads) = state.threads.lock() else {
+            return chatkit_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "聊天状态暂不可用。",
+                origin,
+            );
+        };
+        let Some(thread) = threads.get_mut(thread_id) else {
+            return chatkit_error(StatusCode::NOT_FOUND, "当前对话已结束。", origin);
+        };
+        let pending = thread.pending_action.clone();
+        let valid = pending.as_ref().is_some_and(|pending| {
+            pending_action_valid(
+                pending,
+                offer_id,
+                thread.latest_user_message_id.as_deref(),
+                Utc::now(),
+            )
+        });
+        if !valid {
+            return chatkit_error(StatusCode::CONFLICT, "新对话建议已过期或已处理。", origin);
+        }
+        thread.pending_action = None;
+        if accepted {
+            thread.latest_user_text.clone()
+        } else {
+            None
+        }
+    };
+
+    match (accepted, text) {
+        (true, Some(text)) => {
+            client_effect_response("openread.explanation.draft", json!({"text": text}), origin)
+        }
+        (true, None) => chatkit_error(StatusCode::CONFLICT, "找不到最新的用户输入。", origin),
+        (false, _) => client_effect_response("openread.explanation.dismissed", json!({}), origin),
+    }
+}
+
 fn stream_response(
     state: ServerState,
     thread_id: String,
@@ -351,10 +432,10 @@ fn stream_response(
             &json!({"type": "thread.item.added", "item": assistant}),
         )
         .await
-            || !send_event(&event_tx, &content_part_added_event(&assistant_id)).await
         {
             return;
         }
+        let user_message_id = user_item["id"].as_str().unwrap_or_default().to_string();
         let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
         tauri::async_runtime::spawn(super::stream_completion(
             stream_state.app.clone(),
@@ -362,43 +443,123 @@ fn stream_response(
             route_id,
             history,
             reasoning_effort,
+            assistant_id.clone(),
             completion_tx,
         ));
         let mut cancelled = cancel_rx;
-        let mut text = String::new();
+        let mut current_text = String::new();
+        let mut parts = Vec::<Value>::new();
         let mut annotations = Vec::new();
+        let mut content_index = 0usize;
+        let mut content_open = false;
+        let mut offer_action = None::<String>;
         loop {
             tokio::select! {
                 _ = &mut cancelled => {
-                    if !text.is_empty() {
-                        save_assistant(&stream_state, &thread_id, &assistant_id, &text);
-                    }
+                    save_partial_assistant(
+                        &stream_state,
+                        &thread_id,
+                        &assistant_id,
+                        &created_at,
+                        &parts,
+                        &current_text,
+                        content_open,
+                    );
                     return;
                 }
                 event = completion_rx.recv() => match event {
                     Some(CompletionEvent::Delta(delta)) => {
-                        text.push_str(&delta);
-                        let update = content_part_delta_event(&assistant_id, &delta);
-                        if !send_event(&event_tx, &update).await { return; }
+                        if !content_open {
+                            let update = content_part_added_event(&assistant_id, content_index);
+                            if !send_event(&event_tx, &update).await {
+                                save_partial_assistant(&stream_state, &thread_id, &assistant_id, &created_at, &parts, &current_text, content_open);
+                                return;
+                            }
+                            content_open = true;
+                        }
+                        current_text.push_str(&delta);
+                        let update = content_part_delta_event(&assistant_id, content_index, &delta);
+                        if !send_event(&event_tx, &update).await {
+                            save_partial_assistant(&stream_state, &thread_id, &assistant_id, &created_at, &parts, &current_text, content_open);
+                            return;
+                        }
                     }
-                    Some(CompletionEvent::Annotation(annotation)) => annotations.push(annotation),
-                    Some(CompletionEvent::Title(title)) => set_title(&stream_state, &thread_id, title),
+                    Some(CompletionEvent::Citation(citation)) => annotations.push(chatkit_citation(citation)),
+                    Some(CompletionEvent::Activity { reply_id, segment_id, kind, text }) => {
+                        let effect = activity_effect(&reply_id, segment_id, &kind, &text);
+                        if !send_event(&event_tx, &effect).await {
+                            save_partial_assistant(&stream_state, &thread_id, &assistant_id, &created_at, &parts, &current_text, content_open);
+                            return;
+                        }
+                    }
+                    Some(CompletionEvent::SectionDone) => {
+                        if content_open || !annotations.is_empty() {
+                            let completed_part = output_text_part(&current_text, &annotations);
+                            parts.push(completed_part);
+                            save_item(&stream_state, &thread_id, assistant_item_parts(&assistant_id, &thread_id, &created_at, &parts));
+                            if !content_open {
+                                let update = content_part_added_event(&assistant_id, content_index);
+                                if !send_event(&event_tx, &update).await { return; }
+                            }
+                            let done = content_part_done_event(&assistant_id, content_index, &current_text, &annotations);
+                            if !send_event(&event_tx, &done).await { return; }
+                            content_index += 1;
+                            content_open = false;
+                            current_text.clear();
+                            annotations.clear();
+                        }
+                    }
+                    Some(CompletionEvent::OfferUserAction(action)) => offer_action = Some(action),
                     Some(CompletionEvent::Complete) => {
-                        let item = assistant_item(&assistant_id, &thread_id, &created_at, &text, &annotations);
-                        save_item(&stream_state, &thread_id, item.clone());
-                        let _ = send_event(
-                            &event_tx,
-                            &content_part_done_event(&assistant_id, &text, &annotations),
-                        )
-                        .await;
+                        if content_open || !annotations.is_empty() {
+                            let done = content_part_done_event(&assistant_id, content_index, &current_text, &annotations);
+                            let _ = send_event(&event_tx, &done).await;
+                            parts.push(output_text_part(&current_text, &annotations));
+                        }
+                        let item = assistant_item_parts(&assistant_id, &thread_id, &created_at, &parts);
+                        if !parts.is_empty() {
+                            save_item(&stream_state, &thread_id, item.clone());
+                        }
                         let _ = send_event(&event_tx, &json!({"type": "thread.item.done", "item": item})).await;
+                        if offer_action.as_deref() == Some(OPEN_EXPLANATION_ACTION) {
+                            if let Some(offer_id) = create_action_offer(&stream_state, &thread_id, &user_message_id) {
+                                let effect = json!({
+                                    "type":"client_effect",
+                                    "name":"openread.explanation.offer",
+                                    "data":{"reply_id":assistant_id,"offer_id":offer_id}
+                                });
+                                let _ = send_event(&event_tx, &effect).await;
+                            }
+                        }
                         return;
                     }
                     Some(CompletionEvent::Error(message)) => {
+                        let _ = send_activity_clear(&event_tx, &assistant_id, content_index as u32).await;
+                        if content_open {
+                            let done = content_part_done_event(&assistant_id, content_index, &current_text, &[]);
+                            let _ = send_event(&event_tx, &done).await;
+                            parts.push(output_text_part(&current_text, &[]));
+                        }
+                        if !parts.is_empty() {
+                            let item = assistant_item_parts(&assistant_id, &thread_id, &created_at, &parts);
+                            save_item(&stream_state, &thread_id, item.clone());
+                            let _ = send_event(&event_tx, &json!({"type": "thread.item.done", "item": item})).await;
+                        }
                         let _ = send_event(&event_tx, &json!({"type": "error", "code": "custom", "message": message, "allow_retry": false})).await;
                         return;
                     }
                     None => {
+                        let _ = send_activity_clear(&event_tx, &assistant_id, content_index as u32).await;
+                        if content_open {
+                            let done = content_part_done_event(&assistant_id, content_index, &current_text, &[]);
+                            let _ = send_event(&event_tx, &done).await;
+                            parts.push(output_text_part(&current_text, &[]));
+                        }
+                        if !parts.is_empty() {
+                            let item = assistant_item_parts(&assistant_id, &thread_id, &created_at, &parts);
+                            save_item(&stream_state, &thread_id, item.clone());
+                            let _ = send_event(&event_tx, &json!({"type": "thread.item.done", "item": item})).await;
+                        }
                         let _ = send_event(&event_tx, &json!({"type": "error", "code": "stream_error", "message": "模型响应流中断。", "allow_retry": false})).await;
                         return;
                     }
@@ -424,6 +585,29 @@ fn stream_response(
     response
 }
 
+fn activity_effect(reply_id: &str, segment_id: u32, kind: &str, text: &str) -> Value {
+    json!({
+        "type":"client_effect",
+        "name":"openread.agent.activity",
+        "data":{"reply_id":reply_id,"segment_id":segment_id,"kind":kind,"text":text}
+    })
+}
+
+async fn send_activity_clear(
+    sender: &mpsc::Sender<Bytes>,
+    reply_id: &str,
+    segment_id: u32,
+) -> bool {
+    send_event(sender, &activity_effect(reply_id, segment_id, "clear", "")).await
+}
+
+fn client_effect_response(name: &str, data: Value, origin: &str) -> Response {
+    let event = json!({"type":"client_effect","name":name,"data":data});
+    let body = serde_json::to_string(&event).unwrap_or_else(|_| "{}".into());
+    let body = format!("data: {body}\n\n");
+    response(StatusCode::OK, "text/event-stream", &body, Some(origin))
+}
+
 struct CancelOnDrop(Option<oneshot::Sender<()>>);
 
 impl Drop for CancelOnDrop {
@@ -444,37 +628,42 @@ async fn send_event(sender: &mpsc::Sender<Bytes>, event: &Value) -> bool {
     sender.send(Bytes::from(bytes)).await.is_ok()
 }
 
-fn content_part_added_event(item_id: &str) -> Value {
+fn content_part_added_event(item_id: &str, content_index: usize) -> Value {
     json!({
         "type": "thread.item.updated",
         "item_id": item_id,
         "update": {
             "type": "assistant_message.content_part.added",
-            "content_index": 0,
+            "content_index": content_index,
             "content": {"type": "output_text", "text": "", "annotations": []}
         }
     })
 }
 
-fn content_part_delta_event(item_id: &str, delta: &str) -> Value {
+fn content_part_delta_event(item_id: &str, content_index: usize, delta: &str) -> Value {
     json!({
         "type": "thread.item.updated",
         "item_id": item_id,
         "update": {
             "type": "assistant_message.content_part.text_delta",
-            "content_index": 0,
+            "content_index": content_index,
             "delta": delta
         }
     })
 }
 
-fn content_part_done_event(item_id: &str, text: &str, annotations: &[Value]) -> Value {
+fn content_part_done_event(
+    item_id: &str,
+    content_index: usize,
+    text: &str,
+    annotations: &[Value],
+) -> Value {
     json!({
         "type": "thread.item.updated",
         "item_id": item_id,
         "update": {
             "type": "assistant_message.content_part.done",
-            "content_index": 0,
+            "content_index": content_index,
             "content": {"type": "output_text", "text": text, "annotations": annotations}
         }
     })
@@ -550,6 +739,38 @@ fn page(items: Vec<Value>) -> Value {
     json!({"data": items, "after": null, "has_more": false})
 }
 
+fn output_text_part(text: &str, annotations: &[Value]) -> Value {
+    json!({"type":"output_text","text":text,"annotations":annotations})
+}
+
+fn chatkit_citation(citation: Citation) -> Value {
+    let source = match citation.target {
+        CitationTarget::Source(source) => json!({
+            "type":"entity",
+            "id":format!("{}:{}",source.source_id,source.page_number),
+            "title":source.source_name,
+            "description":format!("PDF 第 {} 页",source.page_number),
+            "label":"原文位置",
+            "inline_label":format!("p.{}",source.page_number),
+            "interactive":true,
+            "data":{"sourceId":source.source_id,"pageNumber":source.page_number.to_string()}
+        }),
+        CitationTarget::Url { title, url } => json!({"type":"url","url":url,"title":title}),
+    };
+    json!({"type":"annotation","source":source,"index":citation.index})
+}
+
+fn assistant_item_parts(id: &str, thread_id: &str, created_at: &str, parts: &[Value]) -> Value {
+    json!({
+        "type": "assistant_message",
+        "id": id,
+        "thread_id": thread_id,
+        "created_at": created_at,
+        "content": parts
+    })
+}
+
+#[cfg(test)]
 fn assistant_item(
     id: &str,
     thread_id: &str,
@@ -557,39 +778,105 @@ fn assistant_item(
     text: &str,
     annotations: &[Value],
 ) -> Value {
-    json!({
-        "type": "assistant_message",
-        "id": id,
-        "thread_id": thread_id,
-        "created_at": created_at,
-        "content": [{"type": "output_text", "text": text, "annotations": annotations}]
-    })
-}
-
-fn save_assistant(state: &ServerState, thread_id: &str, id: &str, text: &str) {
-    if text.is_empty() {
-        return;
-    }
-    let item = assistant_item(id, thread_id, &Utc::now().to_rfc3339(), text, &[]);
-    save_item(state, thread_id, item);
+    assistant_item_parts(
+        id,
+        thread_id,
+        created_at,
+        &[output_text_part(text, annotations)],
+    )
 }
 
 fn save_item(state: &ServerState, thread_id: &str, item: Value) {
     if let Ok(mut threads) = state.threads.lock() {
         if let Some(thread) = threads.get_mut(thread_id) {
-            thread.items.push(item);
+            if let Some(existing) = thread
+                .items
+                .iter_mut()
+                .find(|existing| existing.get("id") == item.get("id"))
+            {
+                *existing = item;
+            } else {
+                thread.items.push(item);
+            }
         }
     }
 }
 
-fn set_title(state: &ServerState, thread_id: &str, title: String) {
-    if let Ok(mut threads) = state.threads.lock() {
-        if let Some(thread) = threads.get_mut(thread_id) {
-            if thread.title.is_none() {
-                thread.title = Some(title);
-            }
-        }
+fn save_partial_assistant(
+    state: &ServerState,
+    thread_id: &str,
+    id: &str,
+    created_at: &str,
+    completed_parts: &[Value],
+    current_text: &str,
+    content_open: bool,
+) {
+    if let Some(item) = partial_assistant_item(
+        id,
+        thread_id,
+        created_at,
+        completed_parts,
+        current_text,
+        content_open,
+    ) {
+        save_item(state, thread_id, item);
     }
+}
+
+fn partial_assistant_item(
+    id: &str,
+    thread_id: &str,
+    created_at: &str,
+    completed_parts: &[Value],
+    current_text: &str,
+    content_open: bool,
+) -> Option<Value> {
+    let mut parts = completed_parts.to_vec();
+    if content_open {
+        parts.push(output_text_part(current_text, &[]));
+    }
+    (!parts.is_empty()).then(|| assistant_item_parts(id, thread_id, created_at, &parts))
+}
+
+fn thread_title(input: &str) -> String {
+    let title = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    let title: String = title.chars().take(32).collect();
+    if title.is_empty() {
+        "新对话".into()
+    } else {
+        title
+    }
+}
+
+fn create_action_offer(
+    state: &ServerState,
+    thread_id: &str,
+    user_message_id: &str,
+) -> Option<String> {
+    let mut threads = state.threads.lock().ok()?;
+    let thread = threads.get_mut(thread_id)?;
+    if thread.latest_user_message_id.as_deref() != Some(user_message_id) {
+        return None;
+    }
+    let id = Uuid::new_v4().to_string();
+    thread.pending_action = Some(PendingAction {
+        id: id.clone(),
+        user_message_id: user_message_id.to_string(),
+        issued_at: Utc::now(),
+    });
+    Some(id)
+}
+
+fn pending_action_valid(
+    pending: &PendingAction,
+    offer_id: &str,
+    latest_user_message_id: Option<&str>,
+    now: DateTime<Utc>,
+) -> bool {
+    pending.id == offer_id
+        && latest_user_message_id == Some(pending.user_message_id.as_str())
+        && (ChronoDuration::zero()..=ChronoDuration::minutes(10))
+            .contains(&now.signed_duration_since(pending.issued_at))
 }
 
 fn allowed_origin(origin: &str) -> bool {

@@ -1,24 +1,28 @@
-# Explanation 主对话 Agent（首版已实现）
+# Explanation 主对话 Agent
 
-`explanation/` 是阅读台右侧主对话的 Agent 工作流，ChatKit 请求从 [`../chatkit.rs`](../chatkit.rs) 进入。它构造统一的 `instructions`、`input`、`tools` 请求并调用 [`../model/`](../model/README.md) 中心路由，不直接拼接供应商请求体或解析供应商流。
+`explanation/` 是阅读台右侧主对话的 Agent，由 ChatKit 经 [`../chatkit.rs`](../chatkit.rs) 接入。循环主体位于 `agent_loop.rs`，由 Explanation 自己负责首轮、阶段转换、工具调用、上下文和结束处理；不调用通用 Agent runner。
 
-## 一轮对话
+## 首轮与提示词
 
-1. 加入全局 `system.md` 和当前 ChatKit 线程的可见文本历史。
-2. 通过 API 请求的 `tools` schema 要求模型调用 `select_workflow`，选择五种工作流之一、一个学科视角并给对话命名。
-3. `skill.rs` 只加载所选任务 prompt 和学科 Markdown skill。
-4. 模型可循环调用 Source 工具。每个工具调用经过名称、JSON 参数、Source UUID、页码范围和结果大小验证。一个回答最多进行 24 轮模型请求、40 次工具调用；遇到模型输出长度上限时，同一回答最多自动续写 8 次，超出后明确报错。
-5. 最终文本增量继续经 ChatKit SSE 显示；`[[cite:rN]]` 在流式中隐藏，并于完成时校验为当前回合实际读取过的 PDF 页，再生成可点击 EntitySource 注释。
+每条新用户消息首轮要求注册表中的 `select_workflow`。它选择五类工作流之一、一个学科阅读视角，并返回 `suggest_new_explanation: bool`；不生成会话标题。会话层根据首条用户输入生成标题。该首轮规则只属于 Explanation，不是其他 Agent 的通用要求。
 
-## Prompt 与工具的区别
+`skill.rs` 将选择映射到已有 workflow prompt 和学科 skill；`system.md` 提供 Explanation 基本规则。`select_workflow` 的处理器把所选 prompt 作为指令动作返回，由 Explanation loop 应用。它不选择模型协议或解析服务商响应。
 
-`system.md` 固定 Agent 职责、安全与证据规则、工作流选择过程及引用协议；`skill/` 按类别补充任务操作指引；`../skill/` 提供选定的学科阅读视角。跨主题或从讨论转完整 Source 讲解时，模型可以建议另开 Explanation，但不能替用户创建。让模型真正知道可调用的工具，需要在每个 API 请求的 `tools` 字段附上函数名、说明和 JSON Schema。system prompt 内的工具注册表便于模型理解职责，但它本身不能启用工具。
+## 取材与正式输出
 
-Source 工具可以列出当前 PDF、读取可选概览和按页读原文。概览不存在时仍允许读取正文。`web_search` 作为搜索意图交由适配器处理：ChatGPT 适配器提供内建搜索；通用 API 适配器没有搜索实现时会明确告知模型当前不可用。
+- **阶段 1 · 取材**：首轮选择 workflow 后，按需调用 Source 工具和适配器支持的内建搜索。过程文字、搜索进度与实际工具状态通过共用回复事件临时显示。本机函数由 Explanation loop 选择本轮工具清单，经注册表校验后交给 `tool::dispatch`；结果作为 `function_call_output` 加入 input。
+- **阶段 2 · 正式输出**：Explanation loop 先清除当前片段的临时播报，再从首个正文增量起写入同一条助手消息。模型可调用 `continue_output` 留在阶段 2 继续当前片段，或调用 `continue_collection` 完成当前片段后回到取材阶段；同一响应若请求两种控制，会收到冲突错误并留在阶段 2。正常结束且没有控制调用时完成整条回复。因服务商输出长度上限而截断时，loop 会自动留在当前阶段续写。
+- **切换校验**：只有完整响应中的控制函数调用且参数校验通过，才会改变下一次请求。普通文字 chunk、JSON 中间片段和未完成参数不会触发切换。取材正常结束未切换时，下一轮只要求 `organize_output`，再失败则报错。
+- **上下文与限制**：同一次运行跨阶段保留完整 input、助手过程文字、函数调用及结果，并原样传递模型层不透明 Context。沿用最多 24 轮请求、40 次工具调用和 8 次连续输出截断续写的上限；主动调用 `continue_output` 受 24 轮请求总上限约束。
+
+两阶段流向是 Explanation 专属行为。对话 Agent 共用的临时播报、正式正文和片段完成事件见 [Agent 总览](../README.md)；流式引用解析由共用 [`../citation.rs`](../citation.rs) 负责。供应商协议和任意文本 chunk 的含义见 [模型 README](../model/README.md)。
+
+## 新建 Explanation 建议
+
+`select_workflow` 返回真时，当前回复结束后显示新开对话选项。`open_explanation` 是独立 ChatKit 用户 action，不会作为模型函数传入请求。后端将一次性建议绑定到当前线程最新用户消息，10 分钟后失效；确认后只返回该条用户原文供前端预填新线程草稿，用户点击发送后才创建服务端线程。拒绝、过期、重复调用或线程已有新消息都不会切换对话。
 
 ## 当前限制
 
-- 左右栏仍是一条基础 ChatKit 线程，没有 Explanation 文档版本、分章节导航、跨线程 Annotation 回顾或 ACR 持久化。复盘只读取当前线程可见历史，当前没有 Annotation 数据可供汇总。
-- 当前 Source 读取、引用锚点只支持 PDF 页码；Markdown 文件导入尚未实现。
-- 聊天记录仍在当前进程内存，新的应用运行不能恢复先前对话；后端没有活动标签/当前页信息，用户用“当前这份/这一页”指代时需先澄清。
-- 前端 EntitySource 点击会激活 Source 并跳页；标记遵循单次回复 `rN` 编号，不用于 ACR 持久引用。
+- Source 工具与引用锚点目前只支持已导入 PDF 和 PDF 页码；Markdown 文件导入尚未实现。
+- 线程、建议状态和对话内容只存在当前进程内存中；应用重启后不能恢复。当前不实现 Annotation、跨会话持久化、Explanation 文档版本或 ACR。
+- 当前 Search 仅由 ChatGPT 路由提供；通用 API 路由明确没有搜索工具实现。

@@ -1,4 +1,5 @@
 mod chatkit;
+pub(crate) mod citation;
 pub mod explanation;
 pub mod initial;
 pub mod model;
@@ -89,9 +90,16 @@ pub struct ChatKitConnection {
 
 #[derive(Debug)]
 pub(crate) enum CompletionEvent {
+    Activity {
+        reply_id: String,
+        segment_id: u32,
+        kind: String,
+        text: String,
+    },
     Delta(String),
-    Annotation(Value),
-    Title(String),
+    Citation(citation::Citation),
+    SectionDone,
+    OfferUserAction(String),
     Complete,
     Error(String),
 }
@@ -290,6 +298,7 @@ pub(crate) async fn stream_completion(
     route_id: String,
     messages: Vec<Value>,
     reasoning_effort: ReasoningEffort,
+    reply_id: String,
     sender: tokio::sync::mpsc::UnboundedSender<CompletionEvent>,
 ) {
     if let Err(error) = explanation::stream(
@@ -298,6 +307,7 @@ pub(crate) async fn stream_completion(
         route_id,
         messages,
         reasoning_effort,
+        reply_id,
         sender.clone(),
     )
     .await

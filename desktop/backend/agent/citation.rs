@@ -1,23 +1,33 @@
 use std::collections::HashMap;
 
-use serde_json::{json, Value};
-
 use crate::agent::{model::WebCitation, tool::SourceCitation};
 
 const PREFIX: &str = "[[cite:";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CitationTarget {
+    Source(SourceCitation),
+    Url { title: String, url: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Citation {
+    pub target: CitationTarget,
+    pub index: usize,
+}
+
 #[derive(Default)]
-pub struct Formatter {
+pub(crate) struct Formatter {
     pending: String,
     pending_start: usize,
     raw_chars: usize,
     visible_chars: usize,
-    annotations: Vec<Value>,
+    citations: Vec<Citation>,
     removed_spans: Vec<(usize, usize)>,
 }
 
 impl Formatter {
-    pub fn push(&mut self, delta: &str, citations: &HashMap<String, SourceCitation>) -> String {
+    pub fn push(&mut self, delta: &str, citations: &HashMap<String, CitationTarget>) -> String {
         if self.pending.is_empty() {
             self.pending_start = self.raw_chars;
         }
@@ -30,10 +40,7 @@ impl Formatter {
                 let after = &self.pending[start + PREFIX.len()..];
                 let Some(end) = after.find("]]") else {
                     let partial = after.strip_suffix(']').unwrap_or(after);
-                    let partial_id = partial.strip_prefix('r').unwrap_or(partial);
-                    if partial_id.len() <= 10
-                        && partial_id.bytes().all(|byte| byte.is_ascii_digit())
-                    {
+                    if partial_citation_id(partial) {
                         self.pending = self.pending[start..].to_owned();
                         self.pending_start = marker_start;
                         break;
@@ -45,11 +52,7 @@ impl Formatter {
                     continue;
                 };
                 let id = &after[..end];
-                if !id.strip_prefix('r').is_some_and(|digits| {
-                    !digits.is_empty()
-                        && digits.len() <= 10
-                        && digits.bytes().all(|byte| byte.is_ascii_digit())
-                }) {
+                if !valid_citation_id(id) {
                     let literal_end = start + PREFIX.len() + end + 2;
                     visible.push_str(&self.pending[start..literal_end]);
                     self.pending_start += self.pending[..literal_end].chars().count();
@@ -59,8 +62,10 @@ impl Formatter {
                 let marker_len = PREFIX.chars().count() + id.chars().count() + 2;
                 self.removed_spans.push((marker_start, marker_len));
                 if let Some(citation) = citations.get(id) {
-                    let index = self.visible_chars + visible.chars().count();
-                    self.annotations.push(annotation(citation, index));
+                    self.citations.push(Citation {
+                        target: citation.clone(),
+                        index: self.visible_chars + visible.chars().count(),
+                    });
                 }
                 self.pending = after[end + 2..].to_owned();
                 self.pending_start = marker_start + marker_len;
@@ -87,8 +92,8 @@ impl Formatter {
         tail
     }
 
-    pub fn annotations(&self) -> impl Iterator<Item = Value> + '_ {
-        self.annotations.iter().cloned()
+    pub fn take_citations(&mut self) -> Vec<Citation> {
+        std::mem::take(&mut self.citations)
     }
 
     pub fn raw_chars(&self) -> usize {
@@ -106,11 +111,29 @@ impl Formatter {
     }
 }
 
-pub fn external_annotations(
+fn partial_citation_id(value: &str) -> bool {
+    let value = value.strip_suffix(']').unwrap_or(value);
+    if value.is_empty() {
+        return true;
+    }
+    let digits = value.strip_prefix('r').or_else(|| value.strip_prefix('w'));
+    digits.is_some_and(|digits| {
+        digits.len() <= 10 && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
+}
+
+fn valid_citation_id(value: &str) -> bool {
+    let digits = value.strip_prefix('r').or_else(|| value.strip_prefix('w'));
+    digits.is_some_and(|digits| {
+        !digits.is_empty() && digits.len() <= 10 && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
+}
+
+pub fn external_citations(
     citations: &[WebCitation],
     formatter: &Formatter,
     raw_offset: usize,
-) -> Vec<Value> {
+) -> Vec<Citation> {
     citations
         .iter()
         .filter_map(|citation| {
@@ -118,32 +141,17 @@ pub fn external_annotations(
             if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
                 return None;
             }
-            Some(json!({
-                "type":"annotation",
-                "source":{"type":"url","url":parsed.as_str(),"title":citation.title},
-                "index":formatter.adjusted_index(raw_offset + citation.index)
-            }))
+            Some(Citation {
+                target: CitationTarget::Url {
+                    title: citation.title.clone(),
+                    url: parsed.to_string(),
+                },
+                index: formatter.adjusted_index(raw_offset + citation.index),
+            })
         })
         .collect()
 }
 
-fn annotation(citation: &SourceCitation, index: usize) -> Value {
-    json!({
-        "type":"annotation",
-        "source":{
-            "type":"entity",
-            "id":format!("{}:{}",citation.source_id,citation.page_number),
-            "title":citation.source_name,
-            "description":format!("PDF 第 {} 页",citation.page_number),
-            "label":"原文位置",
-            "inline_label":format!("p.{}",citation.page_number),
-            "interactive":true,
-            "data":{"sourceId":citation.source_id,"pageNumber":citation.page_number.to_string()}
-        },
-        "index":index
-    })
-}
-
 #[cfg(test)]
-#[path = "../../../../tests/agent_citation.rs"]
+#[path = "../../../tests/agent_citation.rs"]
 mod tests;

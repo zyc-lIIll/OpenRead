@@ -1,9 +1,11 @@
 use axum::http::{header, HeaderMap, HeaderValue};
+use chrono::{Duration, Utc};
 use serde_json::Value;
 
 use super::{
     allowed_origin, assistant_item, authorized, content_part_added_event, content_part_delta_event,
-    content_part_done_event, preflight_response, user_message, user_text,
+    content_part_done_event, output_text_part, partial_assistant_item, pending_action_valid,
+    preflight_response, thread_title, user_message, user_text, PendingAction,
 };
 
 const MODEL_ID: &str = "f3d27c59-1f17-4124-860a-0e1f706294a8";
@@ -77,9 +79,9 @@ fn preflight_allows_the_headers_requested_by_chatkit() {
 #[test]
 fn assistant_stream_adds_content_before_delta_and_finishes_in_order() {
     let actual = [
-        content_part_added_event("message_fixture"),
-        content_part_delta_event("message_fixture", "Hello"),
-        content_part_done_event("message_fixture", "Hello", &[]),
+        content_part_added_event("message_fixture", 0),
+        content_part_delta_event("message_fixture", 0, "Hello"),
+        content_part_done_event("message_fixture", 0, "Hello", &[]),
         serde_json::json!({
             "type": "thread.item.done",
             "item": assistant_item(
@@ -117,4 +119,74 @@ fn assistant_stream_adds_content_before_delta_and_finishes_in_order() {
             "thread.item.done",
         ]
     );
+}
+
+#[test]
+fn unfinished_assistant_content_keeps_completed_citations_only() {
+    let completed = output_text_part(
+        "A completed section.",
+        &[serde_json::json!({"type":"annotation","index":2})],
+    );
+    let item = partial_assistant_item(
+        "message_partial",
+        "thread_partial",
+        "2026-01-01T00:00:00Z",
+        &[completed],
+        "Unfinished text",
+        true,
+    )
+    .unwrap();
+    assert_eq!(item["content"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        item["content"][0]["annotations"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(item["content"][1]["text"], "Unfinished text");
+    assert!(item["content"][1]["annotations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn new_explanation_offer_is_bound_to_the_latest_message_and_expires() {
+    let now = Utc::now();
+    let pending = PendingAction {
+        id: "offer-1".into(),
+        user_message_id: "message-1".into(),
+        issued_at: now - Duration::minutes(9),
+    };
+    assert!(pending_action_valid(
+        &pending,
+        "offer-1",
+        Some("message-1"),
+        now,
+    ));
+    assert!(!pending_action_valid(
+        &pending,
+        "offer-2",
+        Some("message-1"),
+        now,
+    ));
+    assert!(!pending_action_valid(
+        &pending,
+        "offer-1",
+        Some("message-2"),
+        now,
+    ));
+    assert!(!pending_action_valid(
+        &pending,
+        "offer-1",
+        Some("message-1"),
+        now + Duration::minutes(2),
+    ));
+}
+
+#[test]
+fn new_thread_title_comes_from_the_first_user_message() {
+    assert_eq!(
+        thread_title("  Explain\n this topic  "),
+        "Explain this topic"
+    );
+    assert_eq!(thread_title(""), "新对话");
 }

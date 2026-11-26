@@ -26,7 +26,7 @@ OpenRead 是一款以文档为单位的 AI 辅助阅读器，最终目标是 Win
 | Markdown 结构 | 已能从 Markdown 文字解析分级标题、章节范围及图片的源文本锚点；Markdown 文件导入和专属阅读界面尚未实现。 |
 | 模型与账号 | 已实现 API 服务商配置、模型列表/路由，以及 ChatGPT 登录和额度授权流程；主对话可调用本机 Agent 工具。线程仅在应用运行时保留，不关联 ACR。真实账号授权和模型请求仍待 Windows 安装环境实测。 |
 | 思考强度 | ChatGPT 默认强度可在设置中选择，聊天框可单次调整；自动、低、中、高已接入 ChatGPT 请求。API Key 模型不提供此选项。真实模型是否接受所选值仍待实测。 |
-| Agent 功能 | 已实现 PDF Source 初始化、Markdown 概览查看、Explanation 五类工作流、Source 列表/概览/原文工具调用、长回答工具循环、ChatGPT 路由的按需联网搜索，以及可点击的 PDF 页引用。初始化和 Explanation 共用统一请求/响应路由；概览和对话只保存在当前运行内存。Annotation 工作流、会话持久化和 ACR 读写仍未实现。 |
+| Agent 功能 | 已实现 PDF Source 初始化、Explanation 五类工作流、Explanation 自有双阶段 loop、注册工具调用、ChatGPT 路由的按需联网搜索，以及可点击的 PDF 页引用。取材与正式输出可在一条回复中多次切换；线程只保存在当前运行内存。对话 Agent 共用显示事件与引用解析；Annotation 工作流、会话持久化和 ACR 读写仍未实现。 |
 | 其他格式与 ACR | 目标格式还包括 Markdown、TXT、EPUB、DOC/DOCX、PPT/PPTX；当前应用仅支持 PDF。ACR 仍是格式设计，应用读写尚未实现。 |
 | Windows 安装包 | 此前已生成 0.1.0 x64 未签名 NSIS 本地验收包；本次 Agent 请求/响应统一改造尚未重新打包或安装验证。正式版本仍计划经 GitHub Releases 分发。 |
 
@@ -75,15 +75,15 @@ ChatGPT 路由在每个原文分段更新时都可自行决定是否调用联网
 
 概览暂存在当前阅读器和后端工作区内存中；移除 Source 或退出应用后清除，不写入 ACR，也不会自动注入每条聊天，而由 Explanation 按需通过 `get_overview` 读取。页面图像无法读取或模型拒绝图像输入时，会回退到可用文本并列出受影响页码；扫描页的视觉识读效果受图像质量和模型能力影响。初始化的分段、提示词、路由及接口细节见 [`desktop/backend/agent/README.md`](desktop/backend/agent/README.md)。
 
-## Explanation 主对话（首版已实现，待打磨）
+## Explanation 主对话（Explanation 自有双阶段 loop）
 
-主对话会先让模型通过 API 的 `tools` 字段调用 `select_workflow`，选择 Source 讲解、知识问题、伴读讨论、复盘或其他任务，再加载对应类别和学科的 Markdown skill。通用模型层负责把 Chat Completions 与 Responses API 的请求和流式响应归一；Agent 业务逻辑只处理统一的消息、文本增量和工具调用。
+Explanation 在 `desktop/backend/agent/explanation/` 实现自己的循环，负责首轮工作流选择、阶段转换、工具调用、上下文和循环结束处理。未来 Annotation 也由自己的模块实现循环，不需要采用 Explanation 的 `select_workflow` 或阶段控制。
 
-Source 工具位于 `desktop/backend/agent/tool/`：可列出当前已导入 PDF、读取初始化概览，并按页回读原文。没有概览时工具明确返回未初始化，Agent 仍可读原文。模型可在一次回答中多轮调用工具、连贯完成长讲解。ChatGPT 路由还可按需联网搜索；API 服务商路由目前没有搜索能力。
+每条新消息先通过注册表中的首轮必调 `select_workflow` 选择工作流提示词，并给出是否建议另开对话的布尔值。取材阶段可以调用 Source 工具和 ChatGPT 内建搜索，过程播报暂存于 UI；有效 `organize_output` 才切到正式输出。正式输出可通过 `continue_output` 留在阶段 2 继续当前片段，也可通过 `continue_collection` 回到取材阶段准备下一段，同一条助手消息可循环多个片段。工具参数与结果、模型续传上下文不进入临时播报。
 
-原文页引用使用流式协议标记 `[[cite:rN]]`。后端只接受本次回复中 `read_source` 实际提供的编号，将其校验并转换为 ChatKit 可点击实体引用；点击后左侧切换到对应 PDF 和页码。可持久化的引用应保存 Source ID 和稳定锚点（首版为 PDF 页码），不能只保存回复内临时编号或聊天文本偏移；ACR 读写尚未实现。
+工具 schema 和处理函数来自注册表；Explanation loop 决定每轮开放哪些工具，并以同一组工具限制后端执行。Source 工具可列出当前 PDF、读取初始化概览并按页回读原文。通用 API 路由没有搜索实现时会明确不可用。对话 Agent 共用 `desktop/backend/agent/citation.rs` 解析流式引用并计算正文位置，再由 ChatKit 转换为注释；PDF 引用仍跳转到 Source 页，网页引用按正式正文位置定位。
 
-导入 PDF 后会询问是否对本次导入的全部文件执行初始化，确认后逐份处理；选择“否”不影响 Agent 后续读取原文。概览和聊天仍仅存在当前应用运行内存中。当前不包括 Annotation 工作流、跨会话持久化或完整 Explanation 文档版本管理。
+建议另开对话时，用户确认操作会校验建议仍属于当前线程最新输入；确认后只在新线程草稿中填入该条用户原文，发送后才创建线程。取材临时播报、线程和概览仍仅存在于当前应用运行内存。Annotation、跨会话持久化、Explanation 文档版本和 ACR 读写尚未实现。实现边界与阶段图见 [Agent 总览](desktop/backend/agent/README.md) 和 [Explanation README](desktop/backend/agent/explanation/README.md)。
 
 ## Agent 统一请求与响应框架（已实现）
 
