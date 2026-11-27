@@ -1,7 +1,10 @@
-# Source 格式阅读 UI（暂定）
+# Source 格式阅读 UI
 
-本目录按文件格式放置阅读器、渲染和选区交互。后端负责导入、解析及源文档锚点；前端负责把文档呈现出来，并根据当前页面布局计算视觉位置。通用标签、左右分栏和概览入口由 `app_ui` 与 `source_ui` 管理。
+`desktop/frontend/source/` 按原文格式放置阅读器、渲染和阅读选区交互。该层负责当前页面的呈现与几何信息。导入、解析和持久定位归后端 `desktop/backend/source/`；模型上下文读取归后端 `desktop/backend/agent/tool/source/`。页面框架、标签和通用概览由 `app_ui/` 与 `source_ui/` 管理。
 
-暂定所有支持的文件格式都要支持矩形框选，作为对某个原文区域提问或批注的统一入口。矩形截图、屏幕位置和格式原生锚点由阅读器一起提供；各格式可以使用不同的稳定定位方式。
+## 子模块和状态
 
-目前只为 PDF 和 Markdown/TeX 编写格式专属说明：[`PDF/README.md`](PDF/README.md) 和 [`markdown/README.md`](markdown/README.md)。其他格式开始实现时再补各自 README，不预建空目录。当前只支持导入和阅读 PDF；Markdown/TeX 文件阅读尚未接入。
+- [`PDF/`](PDF/README.md) 实现已支持的 PDF 阅读、页码与缩放状态、文字选区及区域图像接口。整页/框选入口尚未实现。
+- [`markdown/`](markdown/README.md) 使用 `MarkdownRenderer.tsx` 呈现 Source 初始化概览的 Markdown / TeX。Markdown Source 文件导入和独立阅读器尚未实现。
+
+未来各格式为 Annotation 提供文字、公式、页面或矩形区域上下文，以及各自稳定锚点。所有格式计划支持区域选择，但持久定位使用格式原生结构，不能统一强加 PDF 页码模型。屏幕位置与稳定锚点分别处理。

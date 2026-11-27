@@ -1,5 +1,7 @@
 # Explanation UI
 
-阅读台右侧目前通过 [`../chat_ui/`](../chat_ui/README.md) 提供 Explanation 主对话入口。ChatKit 展示流式回复、可点击的原文页引用和模型选择；引用点击由 `app_ui` 激活对应 Source，并等待 PDF 阅读器就绪后跳页。
+`agent_ui/explanation_ui/` 是右侧 Explanation 主对话和未来讲解文档的前端职责区。当前主对话由阅读台的 [`chat_ui`](../chat_ui/README.md) 呈现，本目录尚无独立讲解正文或版本视图实现。
 
-独立 Explanation 文档、按章节阅读、版本生成/切换和与 Annotation 的版本关系尚未实现。当前完整对话只保留在运行期 ChatKit 线程中。
+ChatKit 流式显示正文、临时 Activity 和可点击引用。引用跳转由 `app_ui` 激活对应 PDF Source，等待阅读器就绪后定位实际页码。模型路由、阶段转换及授权流程由后端负责。
+
+产品目标还包括按章节阅读讲解、生成新版本并切换版本，Annotation 可关联到创建时的 Explanation 版本。上述文档、版本和关系尚未实现。后端工作流见 [`desktop/backend/agent/explanation/README.md`](../../../backend/agent/explanation/README.md)。

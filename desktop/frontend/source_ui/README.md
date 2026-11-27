@@ -1,9 +1,9 @@
-# Source 阅读 UI
+# Source 内容视图
 
-`source_ui` 放置不依赖具体原文格式的阅读内容视图。目前通用原文阅读器尚未实现；`SourceOverview` 在此展示 Source 初始化生成的 Markdown 概览，原文 PDF 阅读器及其选区/截图接口位于 `desktop/frontend/source/PDF/`。页面框架和标签管理由 `app_ui` 负责。原件保持只读。
+`source_ui/` 放置与具体原文格式无关的内容视图。当前实现 `SourceOverview.tsx` 和对应样式，用于呈现 PDF Source 初始化生成的 Markdown 概览。通用原文阅读器尚未实现，PDF 原文由 [`source/PDF/`](../source/PDF/README.md) 呈现。
 
-概览保存在阅读器和后端 Workspace 运行状态中，返回时 PDF 保持挂载以保留滚动位置；移除 Source 或退出应用后清除。概览不写 ACR，不会自动注入每条聊天，但 Explanation 可按需通过后端工具读取。概览正文使用 `desktop/frontend/source/markdown/MarkdownRenderer.tsx` 和 GFM、KaTeX 渲染，不解析原始 HTML；外部链接只允许 HTTP(S)，并由本机后端打开。Markdown Source 文件导入和阅读器尚未实现；标题、章节范围和图片引用锚点已由 `desktop/backend/source/markdown/` 解析。
+概览由 `app_ui` 管理其打开状态。Markdown 正文复用 `source/markdown/MarkdownRenderer.tsx`，使用 GFM 和 KaTeX 呈现，不执行原始 HTML。概览外部链接经过 HTTP(S) 校验后由本机后端打开。联网来源以独立链接列表展示。
 
-首次没有导入 Source 时，显示一个巨大的「＋」水印。点击空白区域任意位置都可打开文件选择器并导入 Source。导入后按标签切换原文。
+概览只保存在阅读器和后端 `Workspace` 运行状态中。退出概览时 PDF 阅读器保持挂载以保留阅读位置；移除 Source 或退出应用后清除概览。它不写入 ACR、不自动进入每条聊天，Explanation 可按需调用 `get_overview` 读取。
 
-未来按格式使用成熟预览与解析引擎，不在 UI 中自行实现文件解析器。目标是将文字、公式、页面或框选区域交给 `agent_ui/annotation_ui`；当前尚未实现该浮窗及上下文传递。
+本目录当前只有通用概览视图。页面框架、Source 标签和切换状态由 [`app_ui/`](../app_ui/README.md) 管理；格式阅读器按子目录放在 [`source/`](../source/README.md)。Annotation 选区与浮窗上下文尚未接入。

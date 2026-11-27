@@ -1,17 +1,24 @@
 # 共用 Chat UI
 
-`chat_ui` 使用 OpenAI ChatKit React 显示阅读台主对话。后端当前接入 Explanation Agent；各对话 Agent 自己实现循环，共用显示事件。会话只在应用运行期间保留，不写入 ACR，也不接入 Annotation 浮窗。
+`agent_ui/chat_ui/` 使用 ChatKit React 呈现 Agent 对话，管理模型选择、输入、流式消息和确认操作。每个对话 Agent 管理自己的 loop；前端按共享的 ChatKit 事件契约呈现内容。
 
-- 模型列表按设置中的额度优先来源显示：ChatGPT 账户额度或 API 服务商额度。列表由本机后端提供，选中的模型 ID 随 ChatKit 请求交给 Rust 服务路由。
-- 「设置 → 默认模型」分别指定 API 和 ChatGPT 渠道的默认模型；当前聊天仍可手动切换。Source 初始化也使用所选渠道的默认模型。
-- ChatGPT 可在设置中选择默认思考强度，并在聊天框中单独调整；选项为自动、低、中、高。自动模式省略 API 参数，低、中、高通过本机请求头传给 Rust 后端，再映射为 Responses API 的 `reasoning.effort`。API Key 路由不显示也不发送该 ChatGPT 专属参数。
-- ChatGPT 与 API 服务商共用同一个聊天入口和交互；来源只影响可选模型与请求路由。模型标签由后端提供，可呈现服务商与模型名称。
-- 当前隐藏线程历史和附件入口；会话不持久化。界面会显示连接或模型加载状态、错误及重试入口。PDF 原文引用经 EntitySource 注释呈现为可点击位置，点击事件交给 Reader 激活 Source 并跳页。
-- Agent 的过程文字、搜索进度和工具状态由 `client_effect` 临时显示，不写入助手消息或线程历史。正式正文分片追加到同一条助手消息；完成片段的引用按正文位置保存。Agent 切换显示去向时清除当前临时状态；取消或错误也会清理临时状态，并保留已流出的正式片段作为未完成内容。
-- Explanation 建议另开对话时，界面显示“新开对话/暂不”确认。按钮通过已认证的 ChatKit `sendCustomAction` 调用后端；确认后新建空白线程草稿并预填当前对话最新用户原文，不会自动发送或复制旧对话历史。
-- ChatKit 使用官方托管脚本和本地服务端点；前端从 Tauri 获取每次启动生成的访问令牌，并仅通过 Authorization 请求头发送给本地服务。
-- Windows 正式打包前，发布方须通过 `VITE_CHATKIT_DOMAIN_KEY` 配置获发的 domain key，并在 OpenAI ChatKit 中登记打包应用的 Tauri 页面 origin。开发环境默认使用官方 quickstart 示例的 `local-dev`；打包后的 Tauri origin 尚待运行时验证和登记确认。
+## 文件职责和接口
 
-Agent 流程图和共用显示事件见 [`desktop/backend/agent/README.md`](../../../backend/agent/README.md)；Explanation 的循环与工作流选择位于 `desktop/backend/agent/explanation/`。共用工具注册和引用解析分别位于 `agent/tool/`、`agent/citation.rs`。当前 Annotation 工作流、附件、会话持久化和 ACR 写入仍未实现。
+- `ChatKitChat.tsx` 创建 ChatKit React 入口，取得本机服务地址和每次启动生成的 Bearer token，传递选中模型路由 ID和 ChatGPT 思考强度。请求只向 Rust 本机 ChatKit 服务发送。
+- `chatkit.css` 设置 ChatKit 容器样式和临时 Activity 呈现。
+- 后端事件及双阶段显示约定见 [Agent README](../../../backend/agent/README.md)，本机协议和凭据边界见后端 `agent/chatkit.rs`。
 
-登录授权和 API Key 保存不属于这个 UI 模块。
+ChatGPT 与 API 服务商共用同一聊天入口。模型列表和不透明路由 ID 由本机后端提供。Source 初始化使用各渠道默认模型，不属于聊天组件的对话流程。
+
+## 当前交互
+
+- ChatGPT 默认思考强度可在设置中选择，也可在聊天框调整。自动模式不发送 `reasoning.effort`；API Key 路由隐藏此选项。
+- `Activity` 用于阶段 1 的公开取材文字、搜索进度和实际工具状态，不写进助手正文或线程历史。阶段 2 的 `Delta` 更新同一条助手消息；每个完成片段的引用按正文位置附加。
+- Agent 清理 Activity 后可以进入正式输出，也可以在下一片段取材时再次显示 Activity。取消或错误会清理临时内容，并保留已经输出的正式文字与完成引用。
+- PDF EntitySource 引用点击后交给 Reader 激活对应 Source 并跳转页码。
+- Explanation 可向用户提供“新开对话”确认。确认后把当前线程最新用户原文预填到新草稿，不复制历史、不自动发送。
+- 当前线程只保存在运行期内存，附件和 Annotation 浮窗尚未接入。
+
+## ChatKit 部署
+
+Windows 正式包需设置获发的 `VITE_CHATKIT_DOMAIN_KEY`，并在 ChatKit 登记实际打包应用的 Tauri origin。开发环境的 `local-dev` key 只用于本机开发，不证明打包环境已验证。

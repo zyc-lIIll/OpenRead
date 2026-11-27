@@ -1,21 +1,20 @@
-# Agent 模型请求格式与适配器路由
+# Agent 统一模型请求与响应
 
-本文定义 OpenRead Agent 的统一请求格式、服务商适配器职责和请求/响应流程。统一请求与首阶段适配器已经实现；各 Agent 自己管理阶段和用户可见流向，供应商适配器不解释业务阶段。
+`model/` 是 Agent 工作流访问模型的统一边界。调用方构造 OpenRead 请求，中心路由选择适配器，适配器负责服务商请求转换和响应协议解析。模型层不决定业务阶段、工具循环或显示去向。
 
-## 目标统一请求格式
+## 请求格式
 
-Agent 工作流只组装一份 OpenRead 请求。system 指令放在顶层 `instructions`，其他消息放在 `input`，可用工具放在 `tools`。`model` 表示当前选中的 OpenRead 模型路由；中心路由负责解析实际服务商、服务商模型名和认证信息。
+`Request` 包含已解析并固定的模型路由、顶层指令、有序输入、本轮工具清单、工具选择、流式和存储选项、适用的思考强度，以及模型层私有的续传上下文。下方 JSON 仅展示逻辑字段；Agent 先通过 `model::resolve` 把前端给出的不透明路由 ID 解析成路由快照，再构造请求。
 
 ```json
 {
-  "model": "selected-model",
+  "model": "selected-route",
   "instructions": "你是 OpenRead 的阅读助手。",
   "input": [
     {
       "role": "user",
       "content": [
         { "type": "input_text", "text": "请阅读这页 PDF。" },
-        { "type": "input_text", "text": "【第 1 页页面图像】" },
         {
           "type": "input_image",
           "image_url": "data:image/png;base64,...",
@@ -29,7 +28,16 @@ Agent 工作流只组装一份 OpenRead 请求。system 指令放在顶层 `inst
       "type": "function",
       "name": "read_source",
       "description": "读取 PDF 页",
-      "parameters": { "type": "object", "properties": {} }
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source_id": { "type": "string" },
+          "page_start": { "type": "integer", "minimum": 1 },
+          "page_end": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["source_id", "page_start", "page_end"],
+        "additionalProperties": false
+      }
     },
     { "type": "web_search" }
   ],
@@ -39,7 +47,7 @@ Agent 工作流只组装一份 OpenRead 请求。system 指令放在顶层 `inst
 }
 ```
 
-`input` 还要能表示 assistant 的工具调用和工具结果，以便多轮工具对话能经过同一套内部格式：
+`input` 也承载后续工具循环中的 assistant 调用与工具结果：
 
 ```json
 [
@@ -47,7 +55,7 @@ Agent 工作流只组装一份 OpenRead 请求。system 指令放在顶层 `inst
     "type": "function_call",
     "call_id": "call-1",
     "name": "read_source",
-    "arguments": "{\"page_start\":1,\"page_end\":1}"
+    "arguments": "{\"source_id\":\"00000000-0000-4000-8000-000000000001\",\"page_start\":1,\"page_end\":1}"
   },
   {
     "type": "function_call_output",
@@ -57,86 +65,79 @@ Agent 工作流只组装一份 OpenRead 请求。system 指令放在顶层 `inst
 ]
 ```
 
-格式约定：
+- system 指令放在 `instructions`。`input` 按顺序表达 user/assistant 消息、文字/图片块、函数调用和函数结果。
+- `tools` 只描述本轮模型可用的函数或搜索意图。函数必须带名称、说明和 JSON Schema。Agent 根据自己的循环选择工具，模型请求注册和后端 dispatch 使用同一份允许列表。
+- `web_search` 表达搜索意图。当前 ChatGPT 适配器将其映射到服务商内建搜索。通用 API 路由没有搜索实现，会明确告诉模型未搜索，不提供伪造结果。
+- `tool_choice` 为 `none`、`auto` 或 `required`。无法实现必需工具的适配器返回明确错误。未知输入块和不支持工具由适配器拒绝。
+- 当前交互请求使用流式传输。`store: false` 只表示请求不使用服务端对话存储能力，不承诺服务商不保留服务日志。
+- 思考强度只适用于 ChatGPT 路由。自动值省略 API 字段；低、中、高传给 Responses API。其他适配器不替用户改写强度。
 
-- system 指令只放在 `instructions`；`input` 放 `user`、`assistant` 消息及工具调用/结果项。
-- 消息 `content` 是有序内容块。当前需要 `input_text` 和 `input_image`；图片使用 PDF 工具层提供的 Data URL，页码等说明作为相邻文字块。
-- `tools` 是统一工具清单，不增加表示“本机”或“服务商内建”的来源字段。`type` 表示工具语义/形状，由所选适配器决定如何转换。
-- `function` 工具包含 `name`、`description` 和 JSON Schema 参数。模型返回函数调用后，Agent 循环把规范化调用交给 `tool::dispatch`；执行结果作为 `function_call_output` 加回 `input`。
-- `web_search` 表示搜索意图。OpenAI 适配器可映射到服务商内建搜索；通用适配器可映射到已注册的本机搜索函数。目前没有本机搜索实现，因此通用适配器不提供搜索工具，并告知模型本轮不可搜索。
-- `tool_choice` 使用 `none`、`auto`、`required`。若适配器无法提供本轮必需工具，应返回明确错误；不支持的可选工具不能静默伪装成已执行。
-- `stream` 对当前 Agent 请求为 `true`。`store: false` 表示不请求服务商保存对话状态；适配器只在服务商协议支持时发送对应字段，不能据此承诺服务商不保留服务日志。
-- `reasoning_effort` 是可选内部选项，目前只由 ChatGPT 路由使用；其他路由按其能力处理，不能擅自改成另一档强度。
-- 当前只定义已有文字、函数工具、搜索意图和图片需求。文件上传等尚未实现的能力等进入功能范围时再增加规范，不预留任意供应商 JSON 扩展字段。
+Responses API 的专有续传项目只保存在模型层的 `Context` 中。Agent 原样传递该值，不能解析、写进通用消息、显示事件或日志。
 
-Responses 需要续传的原始推理/输出项目由模型层保存为不透明的适配器上下文。Agent 只原样传递，不检查其结构；不得把 Responses 原始项目泄漏到 ChatKit、通用消息字段或日志中。
-
-## 适配器转换职责
-
-每个适配器从统一请求生成对应服务商的请求，并把其流式响应转换成共同的 `ModelEvent` / `ModelTurn`。共同结果至少表达文本增量、函数调用、内建工具进度、引用、完成、截断和错误。
-
-| OpenRead 内部字段 | Responses 适配 | Chat Completions 适配 |
-| --- | --- | --- |
-| `instructions` | 顶层 `instructions` | system role 消息 |
-| user/assistant 文字 | `input` 消息及 `input_text` | `messages` 及 text content |
-| 图片内容块 | `input_image` | `image_url` |
-| 函数定义 | Responses function/namespace tool | function tool |
-| assistant 函数调用 | `function_call` | assistant `tool_calls` |
-| 函数结果 | `function_call_output` | `role: tool` 和 `tool_call_id` |
-| `web_search` | OpenAI 支持时映射为内建搜索 | 有本机搜索处理器时映射为本机 function；当前没有则不可用 |
-| `tool_choice` | Responses 对应选择字段 | Chat Completions 对应选择字段 |
-
-适配器负责处理服务商特有的 namespace、响应帧、工具生命周期、引用格式和续传项；Agent 工作流不拼这些 wire JSON。服务商若已在同一请求中执行内建工具并返回最终文本，适配器将进度/引用和最终响应归一化后送回 Agent；若响应要求 Agent 再发一轮，则把规范化工具结果加回 `input` 后继续循环。
-
-## Agent 阶段与流式事件
-
-- `StreamEvent::Text` 表示一段文本增量。分块边界由服务商决定，单个增量可能只是 JSON 字符串或普通文本的一部分，不代表完整对象、字段或阶段标记。适配器只解析协议帧，不根据正文猜测内容用途。
-- 完整的函数调用在响应终止后归入 `Turn.tool_calls`。调用参数必须完整并由该 Agent 本轮选出的注册工具或控制函数校验；业务阶段只由 Agent 自己决定。
-- `model/mod.rs` 接收 Agent 当前请求选择的工具清单和 `tool_choice`。流式正文由 Agent loop 按发起请求前确定的显示去向路由到临时播报或正式回复。服务商适配器不推断或修改阶段。
-- `SearchProgress`、最终文本、函数调用、引用、截断和错误仍按统一事件/结果返回。服务商专属续传数据仍由模型层放入不透明 `Context`，Agent 只原样传回。
-
-Explanation 的双阶段循环见 [Explanation README](../explanation/README.md)。对话显示事件和共用引用解析见 [Agent README](../README.md) 及 `../citation.rs`；它们不包含 Agent loop。
-
-## 目录和路由约定
-
-- `model/mod.rs` 是唯一中心路由程序：根据已选模型路由确定适配器，取得现有凭据来源，调用适配器构造请求、发送并读取流，再把结果交回 Agent。
-- 每个具体服务商适配器单独放在 `model/` 根目录的一个 `.rs` 文件中：目标模块名为 `chatgpt.rs`、`openai.rs`、`claude.rs`、`deepseek.rs`、`other.rs`。适配器内部同时负责请求转换和该服务商响应解析；不要把多个服务商解析塞进同一文件，也不为未实现服务商创建空占位文件。
-- `chatgpt.rs` 处理 ChatGPT 登录路由；`openai.rs` 处理 OpenAI API 路由；`claude.rs`、`deepseek.rs` 是后续服务商适配器；`other.rs` 处理当前通用兼容服务商。
-- 当前通用服务商配置没有稳定的适配器类型字段，不能靠用户可编辑的显示名称猜测具体服务商。目标路由需要使用稳定 `adapter_id`；旧配置缺少该字段时走 `other`。适配器列表由模型层提供，设置界面读取列表，新增适配器时不改 Agent 工作流或设置选项代码。
-- 当前首阶段适配器为 `chatgpt.rs` 和 `other.rs`。`other` 表示通用 Chat Completions 兼容接口；由于 API 配置没有专属协议标识，不按显示名称猜测服务商，也不新增 `adapter_id`。其他专属服务商适配器仅在需求明确后增加。
-
-## 完整请求与响应架构
-
-以下流程图是目标处理流程，所有服务商响应都先归一化并回到 Agent 循环。Agent 根据结果决定返回文本、执行工具、补充 input 后续请求，或结束/报错。
+## 请求到 Agent loop 的完整流程
 
 ```mermaid
 flowchart TD
-    A["initial / explanation / 未来 annotation 接受响应"] --> B["统一请求：instructions + input + tools"]
-    B --> C["model/mod.rs：选择路由并发送请求"]
-    C --> D["chatgpt.rs"]
-    C --> H["openai.rs"]
-    C --> I["claude.rs"]
-    C --> J["deepseek.rs"]
-    C --> K["other.rs"]
-    D --> L["对应 API 服务"]
-    H --> L
-    I --> L
-    J --> L
-    K --> L
-    L --> F["适配器解析并归一化响应"]
-    F --> A
-    A -->|普通文本输出| M["返回给用户"]
-    A -->|本地工具返回给 tool::dispatch| N["执行本地工具"]
-    N --> O["工具结果追加到 input"]
-    A -->|内建工具，例如 web_search| P["返回查询结果"]
-    A -->|other| O
-    P --> O
-    A -->|完成或报错| Q["结束或错误处理"]
-    O -->|调用模型| A
+    A[Source 初始化 / 对话 Agent] --> B[model::resolve 不透明 ID，固定 Route 快照]
+    B --> C[构造统一 OpenRead Request]
+    C --> D[model/mod.rs 按快照选择适配器并发送]
+    D --> E[chatgpt.rs · Responses]
+    D --> F[other.rs · Chat Completions]
+    E --> G[模型服务]
+    F --> G
+    G --> H[适配器解析协议流]
+    H --> I[归一化事件与 Turn / Error]
+    I --> A
+    A -->|完整本机函数调用| J[Agent 校验当前工具白名单]
+    J --> K[tool::dispatch]
+    K --> L[function_call_output 加入 input]
+    L --> C
+    G -->|内建工具的进度、引用与结果| H
+    A -->|正常结束 / 截断 / 错误 / 取消| M[工作流决定后续处理]
 ```
 
-## 当前实现状态
+适配器只解析协议，不根据普通文本 chunk 猜测业务阶段。Agent 收到完整、校验通过的工具调用后执行本机工具，或消费服务商内建工具结果，然后决定是否发起下一轮。
 
-- `model/mod.rs` 是中心入口，在 Agent 任务开始时解析并持有当前路由快照，将 ChatGPT 登录路由交给 `chatgpt.rs`、API Key 路由交给 `other.rs`；每次请求仍由适配器检查当前凭据和配置，不需要改服务商配置格式。
-- `initial/` 与 Explanation 自有 loop 都传递统一 `Request` 并消费归一化 `Turn`。`input` 支持有序文字/图片内容、函数调用和函数结果；本机函数由 Agent 本轮选择的注册工具验证后交给 `tool::dispatch`。ChatGPT 搜索进度、URL 引用、截断和错误由适配器归一，通用 API 在没有搜索实现时明确告知模型不可搜索。
-- Responses 原始 output items 只保存在模型层 `Context` 中，Agent 只传递该不透明值；供应商请求体和 SSE 解码不再出现在工作流目录。
+## 响应接口
+
+适配器解析产生的 `Event` 在模型层内部逐帧累积。`StreamEvent` 是工作流可订阅的有限流式接口，完整的一轮结果放在 `Turn`，请求和协议错误放在 `Error`。
+
+| 统一结果 | 含义 |
+| --- | --- |
+| 内部 `Event::Text` | 一段文本增量，chunk 边界可能落在任意文字或结构内部 |
+| 内部 `Event::ToolCallDelta` | 尚在累积的函数调用片段，未完成时不能执行 |
+| 内部 `Event::SearchProgress` | 服务商内建搜索的实际进度事件 |
+| 内部 `Event::Completed` / `Truncated` | 当前响应正常结束或触及输出上限，并携带可用的完整输出项目 |
+| 内部 `Event::Failed` | 服务商流返回失败 |
+| `StreamEvent::Text` / `SearchProgress` | 工作流接收的流式正文与搜索进度 |
+| `Turn.text` / `tool_calls` | 一轮完整文本和通过结构完整性检查的函数调用 |
+| `Turn.citations` | 服务商搜索返回的来源信息 |
+| `Turn.context` | 模型层私有续传数据，Agent 只传递 |
+| `Turn.truncated` | Agent 决定是否续写当前任务 |
+| `Error::Cancelled` / `Request` / `Failed` | 取消、HTTP 请求失败或协议/流失败 |
+
+函数调用增量只在模型层累积。响应结束后模型层检查调用 ID、名称和参数是否完整，再放入 `Turn.tool_calls`；JSON 参数与业务约束由 Agent loop 或工具 handler 校验。
+
+只在服务商支持的情况下映射 `store: false` 和思考强度。取消优先于读取响应体和响应流；取消后工作流不能把未完成结果当作完成内容提交。图像被服务商拒绝时，模型层会标记错误类型，Source 初始化工作流再决定是否用纯文字重试。
+
+## 服务商适配器
+
+| OpenRead 字段 | ChatGPT Responses | 通用 Chat Completions |
+| --- | --- | --- |
+| `instructions` | Responses 顶层指令 | 转换成 system 消息 |
+| user/assistant 输入 | Responses `input` 与内容块 | Chat Completions `messages` |
+| `input_image` | Responses 图像块 | `image_url` 内容块 |
+| function 工具 | Responses function 工具，置于 OpenRead namespace | Chat Completions function 工具 |
+| 函数调用与结果 | `function_call` / `function_call_output` | assistant `tool_calls` / `role: tool` |
+| `web_search` | Responses 内建搜索 | 当前无实现，明确报告不可用 |
+| 续传状态 | 模型层不透明 `Context` | 无额外续传状态 |
+
+当前仅有 `chatgpt.rs` 与 `other.rs`。路由由后端签发的不透明模型 ID 解析，不根据用户可编辑的服务商显示名称猜测协议。增加专用服务商时，适配器同时负责请求转换和响应解析；只有路由不能稳定识别协议时才扩展路由信息，并兼容旧配置。
+
+## 子模块与使用位置
+
+- `mod.rs` 定义统一请求、结果、事件、路由入口、通用 SSE 帧读取、取消优先级和通用错误处理。
+- `chatgpt.rs` 转换 Responses 请求，处理 ChatGPT 授权检查、内建搜索、来源引用、图像拒绝和专属续传上下文。
+- `other.rs` 转换通用 Chat Completions 请求，处理消息、函数调用、图像及该协议的流事件。
+- Source 初始化在 `agent/initial/` 使用统一请求获取概览更新。Explanation 在 `agent/explanation/` 使用同一入口完成多轮工具和正文循环。两者共享模型协议，不共享业务阶段。
+- Annotation 目前未实现，接入时应构造相同的 OpenRead 请求并自行管理它的 Agent loop。

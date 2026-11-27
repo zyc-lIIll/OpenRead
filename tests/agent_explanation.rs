@@ -1,4 +1,4 @@
-use super::prompt::system_prompt;
+use super::system_prompt;
 
 #[test]
 fn system_prompt_explains_workflow_selection_and_validated_citations() {

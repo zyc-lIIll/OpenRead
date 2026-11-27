@@ -1,103 +1,87 @@
 # OpenRead 开发指南
 
-## 项目目标与文档职责
+## 开工阅读
 
-OpenRead 是面向多学科阅读任务的 Windows 桌面 AI 阅读器。产品目标和当前状态以根目录 [README.md](README.md) 为准；模块 README 补充该模块的职责、实现状态和限制；本文件约定施工方式与代码放置。
+- 开始前阅读根目录 [README.md](README.md)，理解产品目标、当前实现和整体架构。
+- 阅读本次涉及的模块 README 和实现入口。README 说明模块职责和公约，代码与测试是实现状态的依据。
+- 检查工作区改动。保留用户及其他施工者的变更，避免覆盖或清理无关文件。
+- `Plan.md` 已移除，不要恢复或依赖它记录进度。
 
-### 模块文档索引
+根 README 和模块 README 将现状、产品目标及草案分别标注。没有明确任务时，不把未实现格式、OCR、ACR 或 Annotation 功能顺手加入当前范围。
 
-| 范围 | README |
+## 文档编写与架构记录
+
+- 根目录 `README.md` 是项目级产品行为、整体架构和实现状态的依据：说明产品目标、ACR 公约与草案、目录职责、技术栈及文档导航。明确区分“已实现”“目标”“草案”和“待讨论”，不得把规划写成现成功能。
+- 每个模块 README 说明本目录的目的、统一/对外接口及边界、文件和子目录职责、当前使用者、实现状态与限制。按“本目录做什么、如何被调用、哪些子目录各自负责什么”组织；模块细节放在模块文档，根 README 保持总览。
+- 长 prompt 写在 Markdown 文档中；在实际调用它的程序里明确写出拼接了哪些文档。短的固定 prompt 直接留在调用程序中，按重要程度使用常量或行间字符串，不另建只负责拼接的小模块。
+- 同一公约按项目总览和模块细节分层说明。根 README 放模型请求/响应总览流程图和抽象 Agent 双阶段显示流程图；`desktop/backend/agent/model/README.md` 是模型请求字段、协议映射、事件及模型流程图的详细规范；`desktop/backend/agent/README.md` 放共享组件、组件使用位置和共用显示事件；`desktop/backend/agent/explanation/README.md` 放 Explanation 的实际流程图及专属控制规则。其他文档链接到对应详细规范，不复制整段细节或相同流程图。
+- 抽象公约与具体 Agent 实现分开描述。Explanation 图是 Explanation 实现示例，不代表共用显示公约只适用于 Explanation；`select_workflow`、`organize_output`、`continue_output`、`continue_collection` 等具体名称和行为仍标为 Explanation 专属。注明某项公约适用于谁，并另列当前实际使用者或未来使用者。
+- 描述共用接口时先说明稳定契约和职责边界，再清楚列出“谁调用了什么、目前在哪里使用”。不要把抽象流程、具体实现、使用位置和实现状态混写在同一段里。
+- 提出结构合并建议前先查调用点和实现。优先检查只有单一调用方的转发包装、纯中转文件、重复参数转换或重复职责；给出实际证据、候选合并位置和需保留的校验/错误行为。不要仅因文件较小就建议删除有完整状态或领域职责的模块。建议必须标注为未实施；文档任务不顺带修改实现代码。
+- 文档应描述实际接口和代码行为，不以提示词内容代替接口说明。实现、状态或边界变化时，更新其权威模块 README，并同步修正根 README 的总览和导航；避免无关文档重复维护同一细节。
+
+## 项目架构与代码放置
+
+OpenRead 是面向多学科阅读任务的 Windows 桌面应用。前端负责呈现和阅读交互，本地 Rust 后端负责原件管理、解析、模型路由、Agent 工作流和授权。产品行为和模块导航见 [README](README.md)。
+
+| 目录 | 职责 |
 | --- | --- |
-| 产品与 ACR | [产品与实现状态](README.md) · [ACR 格式草案](ACR/README.md) · [ACR 后端](desktop/backend/acr/README.md) |
-| 后端 Agent | [Agent 总览](desktop/backend/agent/README.md) · [模型请求与响应](desktop/backend/agent/model/README.md) · [Source 初始化](desktop/backend/agent/initial/README.md) · [Explanation](desktop/backend/agent/explanation/README.md) · [Explanation skills](desktop/backend/agent/explanation/skill/README.md) · [通用阅读 skills](desktop/backend/agent/skill/README.md) · [工具](desktop/backend/agent/tool/README.md) · [Source 上下文工具](desktop/backend/agent/tool/source/README.md) · [Annotation Agent（未实现）](desktop/backend/agent/annotation/README.md) |
-| 后端服务 | [Source 导入与解析](desktop/backend/source/README.md) · [Markdown 锚点](desktop/backend/source/markdown/README.md) · [服务商配置](desktop/backend/providers/README.md) · [ChatGPT 授权](desktop/backend/ai-verification/README.md) |
-| 前端 | [应用框架](desktop/frontend/app_ui/README.md) · [Chat UI](desktop/frontend/agent_ui/chat_ui/README.md) · [Explanation UI](desktop/frontend/agent_ui/explanation_ui/README.md) · [Annotation UI（未实现）](desktop/frontend/agent_ui/annotation_ui/README.md) · [Source UI](desktop/frontend/source_ui/README.md) · [Source 阅读器目录](desktop/frontend/source/README.md) · [PDF](desktop/frontend/source/PDF/README.md) · [Markdown/TeX](desktop/frontend/source/markdown/README.md) |
+| `desktop/frontend/app_ui/` | 欢迎页、设置、阅读台和页面级状态 |
+| `desktop/frontend/agent_ui/chat_ui/` | Explanation 与未来 Annotation 共用的聊天呈现 |
+| `desktop/frontend/agent_ui/explanation_ui/`、`annotation_ui/` | 各自 Agent 的前端入口与交互 |
+| `desktop/frontend/source/`、`source_ui/` | 按格式呈现原文、阅读交互和通用概览 |
+| `desktop/backend/source/` | 导入原件、格式解析和稳定锚点 |
+| `desktop/backend/agent/model/` | 统一请求、服务商协议转换和流式响应归一 |
+| `desktop/backend/agent/initial/` | Source 概览初始化流水线 |
+| `desktop/backend/agent/explanation/`、`annotation/` | 各自的对话 Agent loop 和工作流。Annotation 尚未实现 |
+| `desktop/backend/agent/tool/`、`skill/` | 根目录保存各 Agent 共用工具和 skill；Agent 专属内容分别放入 `tool/<agent>/` 和 `skill/<agent>/` |
+| `desktop/backend/agent/tool/markdown.rs` | 按编译期白名单读取内置 Markdown 指引，不接收任意文件路径 |
+| `desktop/backend/agent/mod.rs`、`chatkit.rs`、`citation.rs` | 共用路由与显示事件、本机 ChatKit 服务、流式引用解析 |
+| `desktop/backend/providers/`、`ai-verification/` | API 服务商配置、ChatGPT 授权和凭据 |
+| `ACR/`、`desktop/backend/acr/` | ACR 格式草案与未来读写实现 |
 
-`Plan.md` 已移除，不要恢复、引用或依赖它来记录项目进度。
+Source 的职责分布在后端导入解析、前端阅读呈现、Agent 上下文读取三处。后端解析产生的原文和锚点由前端呈现，Agent 工具按需取用，不从 UI 或模型参数读取任意文件路径。格式能力及子模块详见各自 README。
+
+## Agent 公约
+
+- `desktop/backend/agent/model/README.md` 定义统一请求与响应。Source 初始化和对话 Agent 构造 OpenRead 请求，模型层按不透明路由 ID 选择适配器、解析响应流；Agent 管理业务循环并执行本机函数。
+- `desktop/backend/agent/README.md` 定义对话 Agent 共用显示事件。新回复从阶段 1 开始，取材期间通过 `Activity` 临时显示可见过程文字和实际工具状态；阶段 2 清理当前片段播报，并以 `Delta` 流式写入同一条助手消息。阶段 2 可以正常结束、续写当前片段，或完成当前片段后回阶段 1 取材。
+- 各 Agent 自己负责循环、工具白名单、上下文策略、首轮规则、阶段控制、取消和错误处理。Explanation 的 `select_workflow`、`organize_output`、`continue_output` 与 `continue_collection` 都是 Explanation 专用行为。Annotation 遵循共用显示约定，但有自己的循环和业务规则。
+- `agent/tool/` 和 `agent/skill/` 根目录只放共用实现或内容；专属项放在对应 Agent 子目录。新建 Annotation 时，在 `agent/annotation/` 独立实现 loop，在 `agent/tool/annotation/` 与 `agent/skill/annotation/` 放专属工具和长指引。
+- 各对话 Agent 按 `model/README.md` 构造统一模型请求并消费归一化响应，按 `agent/README.md` 使用共用双阶段显示事件；每个 Agent 自己决定工具、阶段及回复何时结束。
+- `CompletionEvent` 是对话 Agent 共用的显示接口。`Activity` 用于临时播报；正文、引用、片段完成、用户操作、完成和错误使用各自事件。ChatKit/UI 决定如何呈现。
+- `agent/citation.rs` 处理跨 chunk 引用标记、校验目标和正文位置。它不负责 Agent loop。
+- Source 初始化是独立流水线，继续使用自己的进度和结果接口，不接入对话 Agent 显示事件。
+- 工具注册项绑定模型 schema 和 handler。各 Agent 只开放本轮工具子集，后端使用同一子集限制 dispatch。参数、Source ID、页码和结果大小必须在 Rust 后端校验。
+- Responses 专属续传数据由模型层保存为不透明 `Context`。Agent 只原样传递，不放入通用显示事件、ChatKit 或日志。
+
+## 稳定锚点和呈现安全
+
+- PDF 页码从 1 开始并包含封面。页内矩形以未旋转可见页面左上角为原点，按宽高归一化到 `0–1`。Source ID、页码与矩形共同定位；缩放、滚动、屏幕像素和 DPR 不作为持久锚点。
+- Markdown 源范围是从 0 开始、左闭右开的 UTF-8 字节偏移。章节范围按标题层级定义。Markdown 图片的可见矩形由前端依据 DOM 和当前布局计算。
+- Markdown 渲染不执行原始 HTML。外部链接只允许 HTTP(S)，并通过后端打开。公式在界面中由 KaTeX 呈现，源 Markdown/TeX 保持原文。
+- PDF 页图最长边不超过 2,048 px，单张不超过 4 MiB。Source 初始化片段最多 12,000 个 Unicode 字符和 8 张图像。`read_source` 每次最多 5 页，工具输出不超过 48,000 字节。调整这些边界时同步更新对应 README、实现和测试。
+
+## 凭据、路由与输入边界
+
+- Agent 模型请求和 Source 访问只接收后端签发的不透明模型路由 ID 与 Source ID，不接受任意模型 URL、文件路径或调用方凭据。设置页可通过 `save_provider` 提交用户新输入的 Base URL 和 API Key；后端校验并保存配置，读取结果只返回 `hasKey`。Agent 后续按不透明路由 ID 查询已保存配置，并在 `Workspace` 校验 Source UUID。
+- 模型调用时，已保存的 API Key 与 OAuth token 只由 Rust 后端读取，不写入日志、错误、样例、ACR 或 Git。设置表单只在用户保存时提交新输入的 API Key。API 服务商 JSON 当前不加密，界面星号只是遮罩。
+- API Base URL 必须校验 HTTP(S) scheme 和主机，拒绝用户名、密码、查询参数和片段；保留服务商路径前缀。请求仅使用已保存配置和适配器规定的 endpoint。
+- ChatGPT 会话凭据沿用 `ai-verification` 的 Windows DPAPI 保护和原子更新流程。临时网络或服务端错误须保留可重试凭据；只有确认令牌失效、切换账号或用户明确退出时才清除活动凭据。
+- ChatKit 本机服务只绑定 loopback。每次启动生成的 Bearer token 只经 Authorization 头传递，不进入日志。Windows 正式包需配置 `VITE_CHATKIT_DOMAIN_KEY` 并在 ChatKit 登记实际 Tauri origin；开发 `local-dev` key 不代表打包环境已验收。
+- 原文、概览和模型输出都是不可信数据。提示词要求不能代替后端参数及数据边界校验。
+
+## 协作、施工与交付
+
+- 施工前说明仓库/工作树路径、允许改动的文件或目录、职责边界和交付物。核心交互、文件兼容性、凭据或技术栈变更要先说明影响和实现选择。
+- 计划型实现由主代理施工，另一位 Sol 只读独立验收。Sol 报告发现和证据，不修改施工结果；路由不可用时如实说明，不能把施工者自检写成独立验收。
+- 完成后报告实际改动位置、用户入口和验证路径，以及仍待验收项。不得提交、发布或向外部服务发送内容，除非用户明确要求。
+- Windows 安装包以 `desktop/backend/tauri.conf.json` 中的 NSIS 配置为准。构建产物和测试输出放系统临时目录。未签名本地包不代表正式发布。
+- 验收从用户实际入口进行，并记录运行系统、安装包和通过路径。账号登录、额度授权、模型请求分别报告。ACR 实现后，用同一份样例验证导出、干净环境重开和独立实现兼容性。
 
 ## 当前实现基线
 
-- 已有 Windows/Tauri 桌面框架、欢迎页与设置、PDF 导入/阅读/按页解析、Markdown 标题/章节/图片锚点解析、KaTeX 概览渲染、ChatKit，以及 ChatGPT 登录/额度授权和 API 服务商配置与模型路由。
-- 已实现首版 PDF Source 初始化：结合 PDF 文本与页面图像，分段更新 Markdown 概览；ChatGPT 路由可按需联网搜索。概览保存在前端阅读器和后端 Workspace 内存，供 Explanation 工具按需读取；不持久化。
-- 主对话 Explanation Agent 已实现五类工作流选择、学科阅读 skills、注册工具、自有双阶段 Agent loop、ChatGPT 路由的联网搜索以及可点击的 PDF 页引用。取材与正式输出可在同一回复中多次切换。Annotation 问答/自动便签、Explanation 文档版本和会话持久化尚未实现。ChatGPT 思考强度可在设置中选择并由聊天框覆盖；API Key 路由不显示该选项。
-- 当前仅支持 PDF 导入和原文阅读。Markdown 结构锚点解析已实现，但 Markdown 文件导入/阅读尚未实现；其他文件格式、ACR 应用读写和本地 OCR 尚未实现。扫描 PDF 可把页面图像交给支持视觉输入的模型。通用联网搜索仅由 ChatGPT Responses 路由提供，API Key 路由无搜索。除非任务明确要求，不要把这些功能顺手加入当前范围。
-
-根 README 中标为“目标”或“草案”的内容不是已实现功能。修改文档时明确区分现状、产品约定和待讨论事项。
-
-## Agent loop、显示事件与共用引用
-
-- 每个对话 Agent 在自己的目录实现循环，负责自己的 system instructions、工具集、上下文策略、首轮规则、阶段切换、重试和循环结束处理。当前只有 Explanation loop 已实现；`select_workflow`、`organize_output`、`continue_output` 和 `continue_collection` 都是 Explanation 专用约定，未来 Annotation 不被要求采用。Explanation 阶段 2 中，`continue_output` 留在当前片段续写，`continue_collection` 完成当前片段后回到阶段 1。
-- `agent/mod.rs` 的 `CompletionEvent` 是对话 Agent 共用的显示接口。取材过程文字、搜索进度和真实工具状态用 `Activity` 临时显示；正式正文用 `Delta` 写入同一条助手消息；片段引用、片段完成、用户操作、完成和错误也通过该接口交给 ChatKit。各 Agent 决定何时发出事件，ChatKit/UI 负责按统一显示方针呈现。
-- `agent/citation.rs` 是共用引用解析器：流式处理 `[[cite:rN]]` / `[[cite:wN]]`、缓冲跨 chunk 标记、校验引用目标并计算正文位置。不同 Agent 可复用；它不管理 Agent 循环或阶段。
-- 工具注册项绑定模型 schema 与处理函数。每个 Agent 从自己的循环选择本轮工具；同一组已注册工具生成请求 schema 并限制后端 dispatch。参数、Source ID、页范围和输出长度仍由后端校验。用户确认操作单独走 ChatKit action，不作为模型函数暴露。
-- Explanation 首版采用 `KeepAll`，跨取材/正式输出及多个片段保留完整 input 和模型层不透明 Context。后端在请求发出前确定当前响应的显示去向；只有完整、校验通过的函数调用才能改变下一轮阶段。取消或错误会清除临时播报，保留已完成正文与引用。
-- `initial/` 是独立的 Source 概览流水线，继续使用自己的进度与结果接口，不纳入对话 Agent 显示事件。`open_explanation` 仍由用户确认操作调用；后端验证一次性建议绑定到当前对话最新用户消息，确认后只预填原文，发送后才创建新线程。
-
-各 Agent 的循环与显示契约见[Agent 总览](desktop/backend/agent/README.md)和[Explanation README](desktop/backend/agent/explanation/README.md)；供应商协议见[模型模块 README](desktop/backend/agent/model/README.md)。
-
-## Agent 统一请求与响应框架
-
-不同服务商的消息、图片、工具、流式响应、续传和错误协议不同。工作流不得分别拼接服务商请求 JSON、读取服务商 SSE 或解析服务商响应；统一边界如下：
-
-- `initial/` 和各交互式 Agent 只构造 OpenRead 请求：所选模型路由、顶层 `instructions`、有序 `input`、本轮 `tools`、`tool_choice`、`stream`、`store` 和适用的思考强度。交互式 Agent 自己决定循环与阶段流向；模型适配器不推断业务阶段。
-- `model/mod.rs` 是唯一中心入口，按路由选择适配器并将响应流归一后交回工作流。每个任务开始时解析并持有路由快照，避免模型列表刷新中断长任务；每次实际请求仍须由适配器重新检查当下的授权或服务商配置。
-- `model/` 内每个已支持的服务商协议使用独立适配器文件；适配器同时转换请求和解析响应。当前 ChatGPT 登录使用 Responses，API Key 配置使用通用 Chat Completions。不得按可编辑的服务商显示名称猜协议，不创建空占位适配器；只有稳定路由信息不足时才扩展路由标识，并兼容旧配置。
-- 适配器归一化文本增量、函数调用、搜索进度与引用、完成、截断、错误及适用的图像拒绝状态。Agent 根据统一结果显示文本，或把本机函数交给 `tool::dispatch` 执行，再将函数结果加入下一轮 `input`；也可结束或返回错误。
-- 模型可用的函数必须在每次请求的 `tools` 中提供名称、说明和 JSON Schema。system prompt 中提到工具不等于向 API 注册了工具。`web_search` 表示搜索意图：适配器可映射到服务商能力；无实现时必须明确不可用，不得假称搜索已执行。无法提供的必需工具要报错，不可静默忽略。
-- 服务商专属续传数据只能由模型层保存在不透明上下文中；Agent 只原样传递，不检查、不写入通用消息、ChatKit 或日志。`store: false` 只表示请求不使用该服务端对话存储能力，不承诺服务商没有服务日志。
-- 等待网络、错误正文或响应流时，取消信号优先；取消后不得把未完成结果作为完成内容写入工作区。工作流可以处理自己的重试和进度规则，但不得重新实现协议解析。
-
-请求字段、协议映射、事件形状和当前实现见[模型模块 README](desktop/backend/agent/model/README.md)。
-
-## 开始、施工与交付
-
-- 开始前阅读根 README、本次涉及的模块 README 和相关实现；检查现有工作区改动，避免覆盖用户或其他施工者的修改。
-- 施工前说明仓库/工作树路径、允许改动的目录或文件、职责边界及交付物；完成后报告实际改动位置。
-- 对涉及核心交互、文件兼容性、凭据处理或技术栈的变更，先说明影响和实现选择，再按用户授权范围施工。
-- 需要计划的实现任务应写清工作区域、文件所有权、交付物和从用户入口验收的条件。按当前协作约定由主代理施工、另一位 Sol 独立只读验收；Sol 报告发现和证据，不修改施工结果。若指定验收路由不可用，明确说明，不把施工者自检说成独立验收。
-- 保留工作区中与当前任务无关的改动。不得提交、发布或向外部服务发送内容，除非用户明确要求。
-- Windows 安装包以 `desktop/backend/tauri.conf.json` 中的 NSIS 配置为准；构建产物和测试输出放系统临时目录。未签名的本地测试包不代表正式发布。
-- Windows ChatKit 打包需按 [Chat UI 文档](desktop/frontend/agent_ui/chat_ui/README.md) 配置 domain key 并登记正式 origin；不能用开发 `local-dev` key 作为正式包验收证据。
-- 交付说明写明操作方式、实际验证路径和仍待验收项。模拟响应只能证明应用流程；只有真实请求成功才能确认模型接入。
-
-## 代码放置
-
-- `desktop/frontend` 使用 TypeScript、React、CSS 和 Vite。应用框架、欢迎页和设置放 `app_ui`；格式化阅读器和交互放 `source/PDF`、`source/markdown` 等格式目录；通用原文阅读 UI 放 `source_ui`；讲解入口、批注浮窗和共用聊天组件分别放 `agent_ui/explanation_ui`、`agent_ui/annotation_ui`、`agent_ui/chat_ui`。
-- `desktop/backend` 是 Rust/Tauri 本地后端。文档导入、解析和稳定锚点归 `source`；供应商请求/响应格式对接归 `agent/model`；Agent loop 分别归各自的 `agent/explanation`、`agent/annotation`；共用显示事件由 `agent/mod.rs` 定义，共用引用流解析归 `agent/citation.rs`；工具注册与共用 Source 工具归 `agent/tool`，按格式获取 Agent 上下文归 `agent/tool/source`；学科共用 skills 归 `agent/skill`，Explanation 工作流 skills 归 `agent/explanation/skill`；批注锚点和关系归 `annotation`；ChatGPT 授权归 `ai-verification`；服务商配置归 `providers`；ACR 读写归 `acr`。
-- 后端管理导入原件和文档数据，前端负责呈现与阅读交互。按格式选成熟引擎；同一引擎能提供预览和文本时优先复用已打开的文档。共用接口描述格式能力，定位结构按格式选择页码、章节或段落锚点。
-- ACR 公约和兼容性样例放顶层 `ACR/`；应用测试和专用夹具放顶层 `tests/`；运行生成物放系统临时目录。
-
-### 稳定锚点与呈现安全
-
-- PDF 页序从 1 开始且包含封面。页内矩形以未旋转可见页面左上角为原点，按页面宽高归一化到 `0–1`；Source ID、页序与矩形共同标识位置。缩放、滚动、屏幕像素和 DPR 都不是持久锚点。
-- Markdown 源范围使用从 0 开始、左闭右开的 UTF-8 字节偏移；章节范围按标题层级定义。Markdown 图片矩形由前端根据当前 DOM 和布局计算，不将 PDF 页码模型强加给 Markdown。
-- Markdown/TeX 公式选择应识别完整公式并保留原始 TeX，不把公式拆成普通文字片段；该交互接入前仍属于目标约定。
-- Markdown 渲染不执行原始 HTML；外部链接仅允许 HTTP(S)，并由后端打开。公式在界面中用 KaTeX 呈现，原始 Markdown/TeX 文本保持不变。
-- PDF 页面图像最长边不超过 2,048 px、单张不超过 4 MiB；Source 初始化单段最多 12,000 个 Unicode 字符和 8 张图像；`read_source` 每次最多 5 页且工具输出不超过 48,000 字节。若调整这些边界，须同步更新对应模块 README、实现和测试。
-
-### 凭据、路由与输入边界
-
-- 前端只传后端签发的不透明模型路由 ID 和 Source ID；不得让前端传入任意 API URL、文件路径或凭据。后端按路由 ID 查询当前配置，并在 `Workspace` 中校验 Source UUID；工具不得以原始路径读取文件。
-- API Key 和 OAuth token 只由 Rust 后端读取，前端仅获得必要状态（如 `hasKey`）和不透明路由 ID；不要在日志、错误消息、样例、ACR 或 Git 中暴露密钥。服务商 JSON 中的 API Key 当前不加密，星号只是界面遮罩。
-- API Base URL 必须校验 HTTP(S) scheme 和主机，拒绝用户名、密码、查询参数和片段；保留服务商的路径前缀。请求只使用已保存配置和适配器规定的 endpoint。
-- ChatGPT 会话凭据沿用 `ai-verification` 现有的 Windows DPAPI 保护和原子更新流程。临时网络或服务端错误应保留可重试凭据；只有确认令牌失效、切换账号或用户明确退出时才清除活动凭据。不要在 Agent 或 UI 中复制实现令牌存储/刷新。
-- ChatKit 本机端点只绑定 loopback；每次启动生成的 Bearer token 只经 Authorization 头交给本机服务，不进入日志。Windows 正式包必须配置 `VITE_CHATKIT_DOMAIN_KEY` 并登记实际 Tauri origin；开发 `local-dev` key 不代表打包 origin 已验收。
-- Agent 输入中的原文、概览和模型输出都是不可信数据。工具名、JSON 参数、Source ID、页码范围和结果大小必须在后端校验；提示词约束不能代替边界校验。
-
-## 产品约定
-
-- 首阶段聚焦 OpenAI API 和 ChatGPT 登录用户的阅读体验。Source 初始化和 Explanation 可在 ChatGPT 路由中按需联网搜索；Explanation 通过模型 API `tools` 参数注册本机 Source 工具。API Key 路由不提供通用联网搜索。暂不做本地 OCR；其他大型厂商和第三方服务商留待后续阶段。
-- Source 在左，Explanation 在右。原文只读；讲解可按章节阅读，每次重新生成形成新版本，已有批注仍关联原版本。
-- ChatGPT 账号最多登录一个。登录且额度授权成功后默认使用 ChatGPT；用户可切换为 API 服务商，未登录时使用已配置的服务商。渠道只影响可选模型和请求路由，不改变聊天交互。
-- ChatGPT 思考强度默认值在设置中选择，聊天框可对后续请求单独调整；自动模式省略 `reasoning.effort`，低/中/高传入 Responses API。PDF Source 初始化使用默认值。API Key 模型不显示或接收 ChatGPT 专属强度选项；模型不接受明确强度时向用户报错，不自动改值。
-- 服务商配置保存在本机 JSON 中，包含名称、Base URL、API Key 和模型；界面用星号遮住 Key，但 JSON 不加密。密钥不得进入 ACR、日志、样例或 Git。
-- 欢迎页可选择 ChatGPT 登录或先进入阅读台并稍后配置 API 服务商。设置的账号页显示当前授权账户。
-- 根 README 的产品行为优先于 `reference/approved-demo/`；Demo 仅作视觉参考。授权、模型路由和 Agent 业务不能绑定到某个视觉组件。
-- Source 标签移除只从工作区移除来源，不删除导入原件；切换 PDF 标签须保留各文档的页码和缩放状态。阅读台具体交互、比例范围和键盘行为见 [app_ui README](desktop/frontend/app_ui/README.md)。
-- Annotation 的交互类型为 `comment` 和 `question`，但用户不必预先选择类型。Agent 计划在讨论过程中自动整理便签；这和完整讨论记录是不同数据。
-- Annotation 使用共用浮窗聊天；定位锚点与浮窗屏幕位置分开保存，用户可关闭讨论后恢复，也可在回复上继续追问。便签必须能关联回完整 Annotation 讨论；具体目标上下文见根 README 和 [Annotation UI README](desktop/frontend/agent_ui/annotation_ui/README.md)。
-- ACR 目标包含 Source 原件、主对话、讲解/便签及批注完整讨论和关系、引用与附件；不得包含账号凭据或 API Key。读取时校验容器、版本、路径和引用，限制解包大小；写入失败要保留已有文件。
-
-## 验收
-
-从用户实际入口验证改动。记录运行系统、安装包和通过的路径；分别报告账号登录、额度授权和模型请求结果。ACR 功能实现后，使用同一份样例验证导出、干净环境重开和独立实现兼容性。
+- 已实现 Windows/Tauri 应用框架、欢迎页与设置、PDF 导入阅读和按页解析、Markdown 标题/章节/图片锚点解析、概览 KaTeX 渲染、ChatKit、本机授权及 API 服务商配置。
+- 已实现 PDF Source 初始化和 Explanation 五类工作流。Explanation 有自己的双阶段 Agent loop、注册工具、ChatGPT 路由搜索和 PDF 页引用。对话 Agent 共用显示事件和引用解析。
+- 当前只有 PDF 可导入阅读。Markdown 文件阅读、其他文件格式、Annotation Agent/UI、Explanation 文档版本、会话持久化、ACR 读写和本地 OCR 尚未实现。
+- API Key 路由目前没有通用搜索实现。真实账号授权、模型请求和 Windows 安装包的当前验收状态以根 README 中的状态表和对应模块 README 为准。

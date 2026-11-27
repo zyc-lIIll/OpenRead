@@ -1,18 +1,18 @@
-# Markdown / TeX 阅读交互
+# Markdown / TeX 阅读呈现
 
-本模块负责 Markdown/TeX 的前端呈现及未来的阅读选区交互；不导入文件或解析章节结构。Source 概览当前复用 `MarkdownRenderer.tsx`，使用 `react-markdown`、GFM、`remark-math` 和 `rehype-katex`。Markdown Source 导入和原文阅读界面尚未实现。
+`source/markdown/` 负责 Markdown 内容的前端呈现和未来的选区交互，不负责文件导入或章节锚点解析。当前 `MarkdownRenderer.tsx` 被 Source 概览复用，使用 `react-markdown`、GFM、`remark-math` 与 KaTeX 插件。独立 Markdown Source 阅读器尚未实现。
 
-## 显示
+## 渲染规则
 
-- 标题、段落、表格、链接、图片和代码按 Markdown 结构渲染；不执行原始 HTML。
-- `$...$` 与 `\(...\)` 是行内公式边界；`$$...$$` 与 `\[...\]` 是块级公式边界。单行块级公式应独占一行，转换时保留引用或列表前缀；已有多行公式交由 Markdown 解析器原样识别。代码节点（包括标记为 `math` 的代码围栏）保持为代码，再由 KaTeX 渲染公式。
-- 标题锚点、章节范围和图片原文引用由 `desktop/backend/source/markdown/` 解析。前端 Markdown 文件阅读器接入后，应按这些锚点支持标题导航和回到原文。
+- 按 Markdown 结构呈现标题、段落、表格、链接、图片和代码。原始 HTML 不执行。
+- 外部链接仅开放 HTTP(S)，并由 Rust 后端打开。页面内锚点可保留。
+- 行内公式使用 `$...$` 或 `\(...\)`，块级公式使用 `$$...$$` 或 `\[...\]`。单行块级公式需要独占一行并保留引用或列表前缀；多行公式交由 Markdown 解析器识别。
+- 代码节点始终显示为代码，即使围栏语言写作 `math`。公式仅改变显示，源 Markdown/TeX 不修改。
 
-## 未来选区交互
+## 锚点和选区
 
-- **选中文字**：取得所选正文、源文本范围及所在标题路径，用于引用原文和回到该位置。
-- **选中公式**：识别完整公式边界，返回 TeX 内容及所在段落/标题；不要把公式拆成普通文字选区。
-- **矩形框选**：在当前渲染页面上截取可见区域，并保存滚动容器内坐标与 Markdown 锚点。所有格式暂定都应支持矩形框选。
-- **图片位置**：后端提供图片的源文本范围和标题路径；前端按当前 DOM 计算图片矩形和屏幕位置。不要把临时屏幕像素当作后端的稳定锚点。
+后端 [`source/markdown/`](../../../backend/source/markdown/README.md) 提供标题层级、章节范围、图片源文本范围和标题路径。Markdown 导入接入后，前端可据此实现标题导航与回到源文本。
 
-上述选区、矩形截图和 Annotation 上下文传递仍待实现。Markdown 源文本中的公式仍保留原文，KaTeX 只负责显示。
+未来 Annotation 选区需要返回所选文字及 UTF-8 源范围、完整公式及其标题路径，或者当前渲染区域对应的截图和 Markdown 锚点。公式选择应覆盖完整 TeX 表达式。图片屏幕矩形按当前 DOM 计算，不能作为稳定源锚点保存。各格式通用的职责边界见[前端 Source 阅读 UI](../README.md)。
+
+当前只有 Source 初始化概览复用 Markdown 渲染器。Markdown 文件导入、正文阅读器、公式选区和 Annotation 上下文传递尚未实现。

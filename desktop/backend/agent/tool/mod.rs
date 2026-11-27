@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 use crate::source::{pdf, Workspace};
 
+pub(crate) mod explanation;
+mod markdown;
 pub mod overview;
 pub mod source;
 

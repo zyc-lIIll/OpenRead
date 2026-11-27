@@ -1,20 +1,21 @@
 # PDF 阅读器
 
-`PdfViewer` 接收当前导入项的 Source ID 与文件名，在左栏显示 PDF。它把页序和缩放状态交回 `app_ui`，后者按文件标签保存。PDF.js 的 worker、字符映射、字体和解码资源随应用打包。
+`source/PDF/` 显示当前 PDF，并提供页面状态、选区几何、解析桥和区域截图接口。`PdfViewer.tsx` 负责阅读交互，`PdfViewer.css` 定义样式，`document.ts` 对接 PDF.js 和解析命令，`geometry.ts` 处理归一化页内矩形。页码与缩放状态交回 `app_ui`，按 Source 标签保存。
 
-PDF 导入、阅读和按页解析已实现。阅读器工具栏可启动 Source 初始化，并临时查看生成的 Markdown 概览。PDF.js 负责前端渲染，也向 Rust 解析桥提供页面文字、版面信息和 PNG；后端校验请求并管理导入原件。页图不要求页面当前显示在阅读器中，PNG 最长边限制为 2,048 px，图像数据限制为 4 MiB。文字选区读取和区域截图接口已提供；Explanation 引用已能定位到 PDF 页，页/矩形选择入口及 Annotation 上下文传递尚未完成。
+PDF 导入、阅读、逐页文字解析与初始化图像已接入。PDF.js worker、字体、字符映射和解码资源随前端打包。文字选区和区域截图接口可用，Annotation 的页面菜单和拖框交互尚未接入。
 
-## 给 Annotation 和 Explanation 的接口
+## 阅读和解析接口
 
-- `pdfReadDocument(sourceId)` 返回文档页数。`pdfReadPage(sourceId, pageNumber)` 返回单页文字、可见边界、旋转和 PDF 用户单位。页序从 1 开始，包括封面，解析不要求页面在屏幕上。
-- `selectedPdfText(sourceId)` 返回当前单页文字选区、页序和页内矩形。`capturePdfRegion(sourceId, pageNumber, rect)` 返回区域 PNG，可用于文本层缺失的公式、图片和扫描页。
-- `PdfViewer` 接收 `app_ui` 传入的待处理引用跳转；切换 Source 或退出概览后，等文档载入再验证页码并滚动到目标页。
-- 页内矩形以未旋转的可见页面左上角为原点。`x`、`y`、`width`、`height` 按该页面宽高归一化为 `0–1`，与滚动位置、缩放和屏幕像素密度无关。Source ID 和实际页序应与矩形一起保存。
+- `pdfReadDocument(sourceId)` 返回页数。
+- `pdfReadPage(sourceId, pageNumber)` 返回该页文字、可见边界、旋转和 PDF 用户单位。读取不要求页面正在屏幕上。
+- `selectedPdfText(sourceId)` 返回当前页文字选区、页码和归一化矩形。
+- `capturePdfRegion(sourceId, pageNumber, rect)` 返回指定区域的 PNG，可用于扫描页、公式和图片。
+- PDF 解析经 Rust bridge 校验 Source ID 和图像数据。Source 初始化页图最长边为 2,048 px，单张不超过 4 MiB。
 
-## 选区交互规划
+页码从 1 开始且包括封面。矩形以未旋转可见页面左上角为原点，宽高归一化至 `0–1`。保存位置时将 Source ID、页码与矩形一起使用，不以缩放、滚动或屏幕像素作为稳定锚点。
 
-- **选中文字**：返回文字、页码和归一化页内矩形；当前 `selectedPdfText` 可读取浏览器文字选区。
-- **选择整页**：以后支持针对当前页提问，并以实际页码定位；当前页状态由 PDF 阅读器维护。
-- **矩形框选**：用户拖框选择区域，使用 `capturePdfRegion` 取得区域图像；页面序和归一化矩形作为定位锚点。该拖框交互尚未实现。所有 Source 格式暂定都要支持矩形框选。
+## 引用跳转与 Annotation 目标
 
-扫描页可以阅读和截图，有文本层时才会返回提取文字。需要密码的文件会在当前标签提示。
+Explanation PDF 引用由 `app_ui` 激活 Source。阅读器等文档加载后验证页码并跳转。当前页状态按文件标签保留。
+
+产品目标还包括整页提问、拖动矩形框选和向 Annotation 传递截图及锚点。选中文字已有读取接口；整页/框选入口、截图预览和 Annotation 浮窗尚未实现。扫描 PDF 有文本层时可提取文字，无文本层时可把图像交给视觉模型；当前不做本地 OCR。需要密码的文件会在当前标签报告。

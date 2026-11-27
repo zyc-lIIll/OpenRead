@@ -1,12 +1,14 @@
 # Markdown 结构锚点
 
-`mod.rs` 负责从已有 Markdown 文字中解析标题与图片锚点，供后续 Source 阅读交互和 Agent 上下文按章节定位使用。它属于 `desktop/backend/source/`，不做文件导入、Markdown/TeX 显示、屏幕坐标计算或存储。
+`desktop/backend/source/markdown/` 从已取得的 Markdown 文本中解析结构和资源引用，为未来 Markdown 阅读器与 Agent 提供源位置。它属于后端原文解析层，不导入文件、不渲染页面、不计算屏幕坐标，也不存储内容。
 
-`parse(markdown)` 返回：
+## 接口与输出
 
-- `headings`：标题等级、纯文本标题、标题在原文中的范围，以及该标题包含子标题在内的章节范围。章节在下一个同级或更高级标题之前结束。
-- `images`：图片目标地址、标题、替代文字、Markdown 引用在原文中的范围，以及图片所在的标题路径。
+`parse(markdown)` 返回标题与图片集合：
 
-所有范围都是从 0 开始、左闭右开的 UTF-8 字节偏移。前端可用锚点回到源文本；Markdown 图片的可见矩形和屏幕位置必须由前端根据当前渲染结果计算，因为换行、窗口尺寸和样式会改变布局。
+- `headings` 保存标题等级、纯文本、标题范围和包含子标题的章节范围。章节在下一个同级或更高级标题之前结束。
+- `images` 保存目标地址、标题、替代文字、Markdown 引用范围和所属标题路径。
 
-当前只实现结构解析函数。Markdown 文件导入、段落级语义锚点、前后端锚点调用和 Annotation 交互仍未实现；不要把 PDF 的页码模型强加到 Markdown。
+所有源范围从 0 开始，采用左闭右开的 UTF-8 字节偏移。前端用这些偏移回到源文本；图片可见矩形由前端根据当前 DOM 和布局计算。
+
+当前只实现结构解析。Markdown 文件导入、段落级语义锚点、前后端锚点调用和 Annotation 交互尚未接入。字段和 Source 三层职责见[后端 Source README](../README.md)及[前端 Markdown README](../../../frontend/source/markdown/README.md)。

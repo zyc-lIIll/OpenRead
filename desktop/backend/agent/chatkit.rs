@@ -20,7 +20,7 @@ use tauri::AppHandle;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use super::explanation::tools::OPEN_EXPLANATION_ACTION;
+use super::tool::explanation::OPEN_EXPLANATION_ACTION;
 use super::{
     citation::{Citation, CitationTarget},
     AgentState, CompletionEvent, ReasoningEffort,

@@ -1,23 +1,25 @@
-# Source 初始化
+# Source 初始化 Agent
 
-`initial/` 负责把已导入的 Source 分段交给模型，持续更新一份供后续精读使用的 Markdown 概览。当前只支持 PDF。它不负责文件导入、PDF 解析、Markdown 渲染或持久化；对应职责分别在 `desktop/backend/source/`、`desktop/backend/agent/tool/source/` 和前端阅读器中。
+`initial/` 将已导入的 PDF 逐段提供给模型，持续更新一份 Markdown 阅读概览。概览提炼文章结构、章节作用、概念关系、页码和精读关注点，帮助后续阅读和 Explanation 定位原文。它不等同于 Explanation，也不替代原文。
 
-## 入口与流程
+## 调用接口与数据流
 
-`initialize_source` 接收 Source ID、模型路由 ID、ChatGPT 默认思考强度和进度通道，不接收任意文件路径。后端先通过 `Workspace` 校验 Source，再读取 PDF 页数、逐页文字和页面 PNG。页面上下文及分段规则由 `desktop/backend/agent/tool/source/pdf.rs` 管理，PDF.js 解析桥接位于 `desktop/backend/source/PDF/`。自动模式省略 `reasoning.effort`；低、中、高仅用于 ChatGPT 路由，API Key 请求不带该参数。
+前端从 `app_ui/reader.tsx` 调用 `initialize_source`，传 Source ID、模型路由 ID、默认 ChatGPT 思考强度和进度通道。后端通过 `Workspace` 校验 Source，不接受任意文件路径。`cancel_source_initialization` 按 Source 取消正在进行的任务。
 
-每轮模型请求都携带固定 system instructions、上一轮完整概览和当前片段。模型需要返回完整 Markdown 概览及下一部分关注点；只有页边界处才允许建议后续连续页码。后端会校验建议从首个未读页开始、范围不超过 8 页，并从 Markdown 中移除隐藏页码标记。建议缺失或无效时按字符数和页数默认切分。
+PDF 页码与页面图像由 `agent/tool/source/pdf.rs` 和 `source/PDF/` 桥接取得。文字和 PNG 图像通过 `agent/model/` 统一请求送给模型。初始化自己处理分段、图像回退、概览压缩、进度、取消和结构化结果，不进入对话 Agent 的双阶段 loop 或 `CompletionEvent`。
 
-概览正文上限为 6,000 个 Unicode 字符。超出时会额外请求模型压缩一次；压缩后仍超限则返回错误。中间片段可以按模型判断使用联网搜索；ChatGPT 路由提供 `web_search`，API Key 路由不提供联网工具。最后一个可读片段会得到整理完整概览并酌情补充搜索的提示。搜索来源与概览 Markdown 分开返回。
+成功返回 Markdown 概览、搜索来源和阅读限制说明。概览保存在前端阅读器与后端 `Workspace` 内存中，可由 Explanation 的 `get_overview` 工具按需读取。移除 Source 或退出程序时清除，当前不写文件或 ACR。
 
-## PDF 图片与错误处理
+## 分段与模型请求
 
-PDF 页面文字和 PNG 图像在同一轮请求中发送。每段最多 12,000 个 Unicode 字符和 8 张页面图像。页面 PNG 最长边不超过 2,048 px，每张不超过 4 MiB。无文字层的页面仍可由视觉模型根据页面图像阅读；本模块不运行本地 OCR。
+每段最多 12,000 个 Unicode 字符和 8 张页面图像。单张 PNG 最长边不超过 2,048 px、大小不超过 4 MiB。页边界模型可建议下一段连续页码，后端会校验起点和范围，缺失或无效时回到本机默认切分。模型每轮结合上一版概览与新材料返回完整概览，正文最多 6,000 字符；超限后额外尝试压缩一次，仍超限则报错。
 
-单页图像无法生成时，尽可能使用其余页面和可提取文字，并在 `notes` 中列出缺图页。服务商明确拒绝图像输入或携图请求体过大时，会移除图像重试，同时告知模型被省略的页码；模型配置等无关错误仍作为失败返回。若最后一段没有可读文字或可用图像，会基于此前概览完成收尾，并注明未覆盖页码。
+自动思考强度省略 Responses API 字段；低、中、高只用于 ChatGPT 路由。ChatGPT 可按需调用内建搜索，搜索来源单独返回。通用 API 路由没有搜索功能，会说明未检索外部资料。
 
-## 返回与生命周期
+## 图像、失败和取消
 
-成功时返回 Markdown、联网引用和阅读限制说明；取消时返回 `cancelled`。初始化期间通过进度通道报告当前页和阶段，`cancel_source_initialization` 可取消任务。成功的概览保存在前端阅读器状态和后端 `Workspace` 内存中，使 Explanation 可通过 `get_overview` 按需读取；移除 Source 或退出应用后清除，不写入 ACR 或本地文件。
+扫描页没有文字层时仍将页面图像交给支持视觉输入的模型，本模块不做本地 OCR。页面图像无法生成时尽量继续使用其他页和可提取文本，并记录缺失页。若服务商拒绝图像输入，工作流会在适用时改用文字请求并说明未纳入的页码。无可读文字和可用图像的末段会标注未覆盖页码；取消返回 `cancelled`，不保存未完成概览。
 
-提示词、页码建议验证和概览压缩均在 `mod.rs`。初始化将提示词放入统一请求的 `instructions`，把文字和页面图像放入 `input`，并调用 `agent/model/` 中心入口；适配器负责服务商请求转换、发送、SSE 解析和错误归一。图像拒绝后的文字回退及进度/取消仍由初始化工作流处理。格式相关的上下文获取与分段规则留在 `agent/tool/source/`，避免把 PDF 专属逻辑混入模型适配器。
+## 子模块与状态
+
+`initial/` 当前只有 `mod.rs`，其中包含初始化 Tauri 命令、任务协调、提示词、分段请求、压缩、回退、取消和进度处理。Source 通用工具及 PDF 上下文分段器分别位于父级 `agent/tool/` 与 `agent/tool/source/`。该流水线已实现，Markdown 概览由前端安全渲染，跨会话保存与 ACR 集成尚未实现。

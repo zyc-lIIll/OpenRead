@@ -1,5 +1,7 @@
-# 通用阅读 skills
+# 跨学科阅读视角
 
-这里存放可按学科选择的轻量阅读指引，供 Explanation 的工作流分类调用；目前包含数学/理科、理论论文、实验/工程论文和人文社科阅读视角。它们以普通 Markdown 文件维护，便于后续编辑；目前由后端编译时包含，没有用户编辑窗口或用户目录覆盖机制。
+`agent/skill/` 根目录保存可供多个 Agent 使用的共用 skill。这里的文档描述阅读角度，不负责选择对话任务或控制 Agent loop。Agent 专属 skill 放在对应子目录，例如 `explanation/`。
 
-工作流分类 skill 位于 [`../explanation/skill/`](../explanation/skill/)；通用阅读视角与对话任务 prompt 分开维护。
+当前包含数学/理科、人文社科、理论论文、实验与工程论文四类 Markdown 文件。通用视角的默认文字在 Explanation 选择逻辑中内置。所有文件在编译时包含，当前没有用户编辑或目录覆盖机制。
+
+Explanation 的任务类别提示词位于 [`explanation/`](explanation/README.md)，由 `agent/tool/explanation/` 的 `select_workflow` handler 选择并加载。

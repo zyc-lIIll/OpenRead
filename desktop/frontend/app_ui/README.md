@@ -1,39 +1,35 @@
 # 应用框架 UI
 
-`app_ui` 负责欢迎页、设置页和双栏阅读台的页面结构、导航及页面级状态；Source 预览、Explanation 正文、批注浮窗和聊天内容由对应 UI 模块负责。
+`app_ui/` 负责欢迎页、设置页和双栏阅读台的页面结构、导航与页面级状态。Source 阅读呈现、聊天消息和 Agent 专属交互由对应前端模块提供。
 
-## 当前实现状态
+## 当前入口与接口
 
-当前已有基本应用框架、欢迎/设置入口、Source 与右侧聊天区域、Source 标签和 PDF 阅读器。导入 PDF 后会询问是否初始化本批文件，确认后按顺序处理。初始化后的 Markdown 概览留在当前运行内存，由 Explanation Agent 按需读取。右侧 ChatKit 已接入五类工作流、Source 工具循环和原文引用；点击引用会激活对应 PDF 并跳到页码。当前还没有可保存/切换版本的 Explanation 文档界面，Annotation 浮窗也尚未实现。
+- 欢迎页提供 ChatGPT 登录和直接进入阅读台使用 API Key 两种入口。
+- 阅读台管理 Source 标签、PDF 当前页与缩放状态、概览查看、右侧 ChatKit 对话和引用跳转。
+- 设置管理 API 服务商、ChatGPT 账号、默认模型、ChatGPT 思考强度和主题。服务商编辑表单可以提交用户输入的新 API Key；后端读取结果只返回 `hasKey`，不返回已保存的 Key。OAuth token 不交给前端。
+- PDF 导入后，用户可选择初始化本次导入的 Source。初始化逐个执行，可查看进度、取消并切回概览。
 
-## 欢迎页
+当前已实现阅读台基础框架与 Explanation 主对话入口。页面没有 Explanation 文档版本管理，Annotation 浮窗尚未接入。
 
-- 提供「ChatGPT 登录」和「使用 API Key」两个入口。
-- 选择 API Key 后可直接进入阅读台，并提示用户可以稍后在设置里添加服务商。
+## 阅读台产品约定
 
-## 阅读台 UI 约定（目标）
+- 左栏为 Source，右栏为 Explanation。标签切换保留每个 PDF 的页码和缩放状态。
+- Source 移除只从本次工作区移除后端导入副本，原文件保留。移除非当前标签时保持当前选择；移除当前标签时优先选择右侧，再选择左侧仍存在的标签。
+- 两栏可拖动或键盘调整，比例范围为 30%–70%。中央分隔线 1px 并留出可操作热区。Source 与 Explanation 标签栏高 36px，内容过多时横向滚动。
+- 页面左侧导航轨宽 44px，设置按钮点击区域为居中的 36px 方形。主题仅改变应用 UI，原始文件保持自己的阅读外观。
+- 这些界面尺寸和部分交互细节是产品约定。交互未实现时需在功能状态中标明。
 
-- 顶部左侧显示 OpenRead 和「文件」菜单；左下角齿轮进入设置。
-- 左侧 Source、右侧主对话，各自使用标签切换内容；左侧标签栏末尾的「＋」用于导入原文。
-- Source 和 Explanation 标签栏高 36px，超出空间时可横向滚动；Source 每个标签内有独立移除按钮。确认框显示目标文件名，移除非当前标签时保持当前选择，移除当前标签时优先切换到右侧、再切换到左侧。移除只从工作区移除来源，原文件保留。
-- 当前 PDF 在左侧标签栏下方显示。切换标签时保留各文档的页码和缩放状态，阅读器由 `frontend/source/PDF` 提供。
-- 中央分隔线为 1px，周围保留透明拖动区域；可拖动或用键盘调整两栏比例，范围为 30%–70%。
-- 阅读台左侧导航轨宽 44px，设置按钮的点击区域为居中的 36px 方框。
-- 面板底部输入区的背景比正文区域稍深，输入区尽量保持饱满；具体留白可参考 Demo 后微调。
-- 两栏比例可调整。主题切换影响应用界面，原始文件保持只读和原有阅读外观。
+## 设置与模型来源
 
-## 设置页
+设置分别保存 API 和 ChatGPT 默认模型。聊天框可切换当前对话模型；Source 初始化使用所选来源的默认模型。ChatGPT 默认思考强度支持自动、低、中、高，聊天框可覆盖当前和后续对话请求。自动省略 Responses API 参数；API Key 路由不显示或发送该选项。
 
-管理 API 服务商、ChatGPT 账号和主题。服务商的名称、Base URL、模型和 API Key 配置按产品约定编辑；API Key 在界面中显示为星号。
+账号页显示当前 ChatGPT 账号和额度授权状态，并可切换 ChatGPT/API 模型来源。关闭 ChatGPT 来源选择不会退出账号。额度授权需针对当前账号明确请求。真实登录、额度授权和模型请求必须在目标 Windows 环境验收。
 
-「默认模型」分类分别保存 API 和 ChatGPT 默认模型，供新聊天及 Source 初始化使用。ChatGPT 默认思考强度供普通聊天和 Source 初始化使用；聊天框可单独调整本次及后续聊天请求。强度保存在本机浏览器设置中，自动模式不向模型请求发送 `reasoning.effort`。若保存的模型当前不可用，界面提示并暂用当前列表首个模型。
+## 相关模块
 
-账号页用一条紧凑连接行显示 ChatGPT 账号、额度授权状态和来源开关。开关打开时选择 ChatGPT 模型，关闭时选择 API 服务商模型；关闭开关不会退出账号。来源选择保存在本机前端设置中，登录且额度授权成功后默认选择 ChatGPT。额度尚未授权时，打开开关会为当前账号请求授权；取消或失败后仍使用 API 来源。账号连接行最右侧提供“退出登录”和“重新登录”按钮；若远程吊销未确认，会提示用户到 ChatGPT 设置中移除 OpenRead。未来加入其他登录来源时，沿用同一来源选择，确保最多一个登录来源开启。
+- [`agent_ui/chat_ui/`](../agent_ui/chat_ui/README.md) 实现阅读台共用聊天。
+- [`source_ui/`](../source_ui/README.md) 呈现 Source 概览和通用原文区域。
+- [`source/PDF/`](../source/PDF/README.md) 实现 PDF 阅读、页码跳转和选区接口。
+- [`agent_ui/explanation_ui/`](../agent_ui/explanation_ui/README.md) 描述 Explanation 主对话入口。未来 Annotation UI 见 [`agent_ui/annotation_ui/`](../agent_ui/annotation_ui/README.md)。
 
-欢迎页的 ChatGPT 登录会打开系统浏览器，等待完成后进入阅读台；用户可以取消等待，也可以直接选择 API Key 进入阅读台。已有登录状态会在启动时恢复。聊天 UI 和模型列表已接入 Explanation 工作流；Annotation 工作流和完整 Explanation 文档版本管理尚未实现。
-
-## 组件与参考
-
-页面组件承载展示与交互，不把登录授权或模型路由绑定到特定视觉组件。共享聊天交互由 `agent_ui/chat_ui` 提供。
-
-视觉参考在 [`reference/approved-demo/`](../../../reference/approved-demo/)。Demo 用于参考外观；与本 README 的操作说明不一致时，以本 README 为准。
+视觉 Demo 在 [`reference/approved-demo/`](../../../reference/approved-demo/)，只作外观参考。产品行为以根 README 和本模块文档为准；模型路由和授权逻辑不绑定到视觉组件。

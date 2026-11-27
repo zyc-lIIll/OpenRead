@@ -6,6 +6,10 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use tokio::sync::mpsc;
 
+use crate::agent::tool::explanation::{
+    self as explanation_tools, CONTINUE_COLLECTION, CONTINUE_OUTPUT, ORGANIZE_OUTPUT,
+    SELECT_WORKFLOW,
+};
 use crate::agent::{
     citation::{self, CitationTarget},
     model::{self, Context, Error as ModelError, Route, StreamEvent, ToolChoice},
@@ -16,11 +20,6 @@ use crate::agent::{
 const MAX_MODEL_TURNS: usize = 24;
 const MAX_TOOL_CALLS: usize = 40;
 const MAX_CONTINUATIONS: usize = 8;
-const SELECT_WORKFLOW: &str = "select_workflow";
-const ORGANIZE_OUTPUT: &str = "organize_output";
-const CONTINUE_OUTPUT: &str = "continue_output";
-const CONTINUE_COLLECTION: &str = "continue_collection";
-
 pub(crate) enum LoopOutcome {
     Completed(Vec<String>),
     Cancelled,
@@ -396,7 +395,10 @@ fn request_tools(
         return Ok((selected, schemas));
     }
     if force_organize {
-        return Ok((ToolRegistry::default(), vec![control_tool(ORGANIZE_OUTPUT)]));
+        return Ok((
+            ToolRegistry::default(),
+            vec![explanation_tools::control_tool(ORGANIZE_OUTPUT)],
+        ));
     }
 
     let selected = match stage {
@@ -406,29 +408,15 @@ fn request_tools(
     let mut tools = selected.schemas();
     match stage {
         Stage::Collect => {
-            tools.push(control_tool(ORGANIZE_OUTPUT));
+            tools.push(explanation_tools::control_tool(ORGANIZE_OUTPUT));
             tools.push(model::web_search_tool());
         }
         Stage::Compose => {
-            tools.push(control_tool(CONTINUE_OUTPUT));
-            tools.push(control_tool(CONTINUE_COLLECTION));
+            tools.push(explanation_tools::control_tool(CONTINUE_OUTPUT));
+            tools.push(explanation_tools::control_tool(CONTINUE_COLLECTION));
         }
     }
     Ok((selected, tools))
-}
-
-fn control_tool(name: &str) -> Value {
-    let description = match name {
-        ORGANIZE_OUTPUT => "结束当前取材片段并开始面向用户的正式输出。",
-        CONTINUE_OUTPUT => "继续当前正式输出，并保持在正式输出阶段。",
-        _ => "结束当前正式输出片段，并继续取材准备下一段。",
-    };
-    json!({
-        "type":"function",
-        "name":name,
-        "description":description,
-        "parameters":{"type":"object","properties":{},"additionalProperties":false}
-    })
 }
 
 fn append_assistant_message(input: &mut Vec<Value>, text: &str) {

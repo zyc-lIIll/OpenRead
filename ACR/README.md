@@ -1,35 +1,41 @@
-# ACR 开发者公约（草案）
+# ACR 开发者公约草案
 
-ACR（Annotation Co-Reading）用于把原始材料和阅读成果装进一份可传送、可由兼容阅读器读取的文件。当前方案是 ZIP 容器和 JSON 元数据；本文件描述草案方向，不代替尚未完成的正式格式规范。应用中的 ACR 导入/导出尚未实现。
+ACR（Annotation Co-Reading）是用于交换原始材料和阅读成果的开放档案格式。产品目标是把 Source、Explanation、Annotation 及其稳定关系放入一份可移交的 `.acr` 文件，让兼容阅读器在没有原文件目录、账号或运行缓存时仍能显示已保存内容。
 
-## 容器示例
+当前方案使用 ZIP 容器和 JSON 元数据。本文件记录格式方向和安全边界，不是已冻结的 schema。OpenRead 目前尚未实现 ACR 导入或导出。
+
+## 目标容器结构
 
 ```text
-物理笔记.acr
-├── manifest.json        格式版本、材料清单和相对路径
-├── sources/             原始 PDF、PPTX 等文件
-├── conversations/       主对话及 Annotation 详细讨论
-├── explanations/        Explanation 文档/版本
-├── annotations.json     批注、便签、锚点和父子关系
-└── attachments/         框选截图等阅读附件
+reading.acr
+├── manifest.json        格式版本、稳定 ID 和容器内相对路径
+├── sources/             导入时保留的原始文件
+├── conversations/       Explanation 和 Annotation 完整对话
+├── explanations/        Explanation 文档及版本
+├── annotations.json     便签、锚点和父子关系
+└── attachments/         区域截图等阅读附件
 ```
 
-## 数据关系
+上述目录名和 JSON 结构仍是讨论中的草案，正式实现前需要确定兼容规范。
 
-- `manifest.json` 声明格式版本、稳定 ID 和容器内文件路径。
-- Source 保留原文件；所有主对话、Explanation 和便签均持久化，并可引用原文位置。
-- Annotation 记录类型（`comment` 或 `question`）、锚点、完整讨论及父子关系。Agent 生成的便签与产生它的 Annotation 关联；用户应能从便签找到详细讨论。子批注可指向父讨论中的具体回复。
-- 定位信息按格式选择合适方式，例如 PDF 原文 ID 与实际页序，或章节、段落锚点。PDF 框选额外保存页内坐标和截图。
-- 引用锚点由 Source 的稳定 ID 和格式锚点组成。PDF 首版锚点为 `{ "source_id": "<manifest source id>", "kind": "pdf_page", "page": 12 }`；未来需要定位页内选区时，再附加基于未旋转页面左上角归一化的矩形和可选原文范围。临时 Agent 回复中的 `rN` 仅在单次回复内有效，不能作为 ACR 引用 ID 持久化。
-- 一条 Explanation 引用还应保存其对话/讲解片段的引用位置（例如片段内字符范围）以及上述原文锚点。呈现时可把引用位置渲染为可点击实体；源文件和锚点决定跳转，聊天文本偏移不决定原文定位。
-- ACR 不保存账号凭据或 API Key。阅读所需的图片等附件随包保存。
+## 数据和关系
 
-上述文件布局和数据关系仍是产品目标，具体 JSON schema 与正式兼容性规范尚待确定。
+- `manifest.json` 声明 ACR 格式版本、稳定来源 ID 和容器内相对路径。相同 Source 在导入、导出间保持同一稳定 ID。
+- 档案保存原始 Source、主对话、Explanation 文档及版本、Annotation 便签、完整讨论和附件。便签能回到生成它的讨论；子批注可引用父讨论中的具体回复。
+- Annotation 的类型为 `comment` 或 `question`。用户不必预先指定，Agent 可根据讨论整理便签。
+- 锚点由稳定 Source ID 和格式原生位置组成。PDF 使用页码，未来选区可附带归一化矩形或原文范围；Markdown 可使用标题路径及 UTF-8 源范围。临时屏幕位置不作为持久锚点。
+- PDF 页码从 1 开始且包含封面。页内矩形以未旋转页面左上角为原点，按可见页面宽高归一化到 `0–1`。
+- Explanation 的正文引用还需要保存其在对应文档或片段内的位置，以及跳转所用的 Source 锚点。单次 Agent 回复中的 `[[cite:rN]]`、`[[cite:wN]]` 编号只是运行期临时值，不能写成 ACR ID。
+- 账号凭据和 API Key 不进入 ACR。阅读所需的图片、截图等附件随档案保存。
 
-当前运行时已使用 PDF 页码锚点，并通过 ChatKit EntitySource 的 `data.sourceId` 与 `data.pageNumber` 实现会话内跳转；该映射尚未持久化到 ACR。将来 ACR 的 Source ID 应由 `manifest.json` 稳定分配并在导入、导出间保持一致。回复流中的 `[[cite:rN]]` 由后端校验后转成实体注释，临时编号及其在回答中的字符位置不能替代 ACR 持久锚点。
+当前 ChatKit EntitySource 使用 Source ID 与 PDF 页码，实现会话内跳转。运行期 UUID 和临时引用尚未持久化；将来由 manifest ID 映射到稳定格式锚点。
 
-## 读写要求
+## 读写和兼容边界
 
-阅读器应校验容器、格式版本、路径和引用；拒绝越界路径并限制解包大小。写入失败时保留已有文件。容器内路径相对于 ACR 根目录。
+读取方校验 ZIP 容器、格式版本、路径和引用关系，拒绝越界路径并限制解包总量。容器内路径始终相对于 ACR 根目录。写入期间出现错误时保留现有文件。
 
-实现位于 [`desktop/backend/acr/`](../desktop/backend/acr/README.md)。格式兼容性尚未经过跨阅读器实测；正式规范和公开样例完成后，应使用同一份 ACR 验证导出、干净环境重开和独立实现。
+正式规范和公开样例确定后，使用同一份样例分别验证导出、干净环境重开和独立实现兼容性。跨阅读器兼容目前尚未验收。
+
+## 实现位置
+
+`ACR/` 保存格式公约和兼容样例。未来应用读写位于 [`desktop/backend/acr/`](../desktop/backend/acr/README.md)，与账号凭据和服务商配置分开。当前该后端目录尚无读写实现。

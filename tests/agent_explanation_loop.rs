@@ -3,16 +3,18 @@ use serde_json::json;
 use super::{
     append_web_citation_context, control_call, first_turn_tool_allowed,
     has_conflicting_stage_controls, output_route, request_tools, OutputRoute, Stage,
+};
+use crate::agent::tool::explanation::{
     CONTINUE_COLLECTION, CONTINUE_OUTPUT, ORGANIZE_OUTPUT, SELECT_WORKFLOW,
 };
 use crate::agent::{
-    explanation, model,
-    tool::{self, ToolRegistry},
+    model,
+    tool::{self, explanation as explanation_tools, ToolRegistry},
 };
 
 fn registry() -> ToolRegistry {
     let mut registry = tool::shared_registry();
-    registry.extend([explanation::tools::select_workflow_tool()]);
+    registry.extend([explanation_tools::select_workflow_tool()]);
     registry
 }
 
